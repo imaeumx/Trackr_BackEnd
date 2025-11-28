@@ -18,7 +18,14 @@ from .serializers import (
     UpdatePlaylistItemStatusSerializer,
     UserRegistrationSerializer,
 )
-from .services import search_tmdb, get_or_create_movie_from_tmdb, TMDBError
+from .services import (
+    search_tmdb,
+    get_or_create_movie_from_tmdb,
+    TMDBError,
+    get_tmdb_tv_details,
+    get_tmdb_tv_season_details,
+    get_tmdb_popular,
+)
 
 
 class RegisterView(APIView):
@@ -86,6 +93,7 @@ class TMDBSearchView(APIView):
     def get(self, request):
         query = request.query_params.get('query', '')
         page = request.query_params.get('page', 1)
+        media_type = request.query_params.get('type', 'multi')
         
         if not query:
             return Response(
@@ -99,7 +107,7 @@ class TMDBSearchView(APIView):
             page = 1
         
         try:
-            results = search_tmdb(query, page)
+            results = search_tmdb(query, page, media_type)
             return Response(results)
         except Exception as e:
             return Response(
@@ -133,6 +141,57 @@ class TMDBMovieDetailView(APIView):
             )
 
 
+class TMDBTVDetailView(APIView):
+    """Proxy endpoint for TMDB TV show details (with seasons list)."""
+    permission_classes = [AllowAny]
+
+    def get(self, request, tmdb_id):
+        try:
+            details = get_tmdb_tv_details(tmdb_id)
+            return Response(details)
+        except TMDBError as e:
+            return Response({"error": str(e)}, status=status.HTTP_404_NOT_FOUND)
+        except Exception as e:
+            return Response({"error": str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
+class TMDBTVSeasonDetailView(APIView):
+    """Proxy endpoint for TMDB TV season (episodes list)."""
+    permission_classes = [AllowAny]
+
+    def get(self, request, tmdb_id, season_number):
+        try:
+            season_data = get_tmdb_tv_season_details(tmdb_id, season_number)
+            return Response(season_data)
+        except TMDBError as e:
+            return Response({"error": str(e)}, status=status.HTTP_404_NOT_FOUND)
+        except Exception as e:
+            return Response({"error": str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
+class TMDBPopularView(APIView):
+    """Proxy endpoint for TMDB popular movies/TV shows."""
+    permission_classes = [AllowAny]
+
+    def get(self, request):
+        media_type = request.query_params.get("type", "movie")
+        page = request.query_params.get("page", 1)
+
+        try:
+            page = int(page)
+        except (ValueError, TypeError):
+            page = 1
+
+        try:
+            results = get_tmdb_popular(media_type, page)
+            return Response(results)
+        except Exception as e:
+            return Response(
+                {"error": str(e)},
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR
+            )
+
+
 class MovieViewSet(viewsets.ModelViewSet):
     """
     API endpoint for Movie CRUD operations.
@@ -156,6 +215,7 @@ class MovieViewSet(viewsets.ModelViewSet):
         If not, fetch from TMDB, create locally, and return.
         """
         tmdb_id = request.data.get('tmdb_id')
+        media_type = request.data.get('media_type', Movie.MediaType.MOVIE)
         
         if not tmdb_id:
             return Response(
@@ -172,7 +232,7 @@ class MovieViewSet(viewsets.ModelViewSet):
             )
         
         try:
-            movie, created = get_or_create_movie_from_tmdb(tmdb_id)
+            movie, created = get_or_create_movie_from_tmdb(tmdb_id, media_type)
             serializer = MovieSerializer(movie)
             return Response(
                 serializer.data,

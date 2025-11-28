@@ -13,6 +13,7 @@ class MovieSerializer(serializers.ModelSerializer):
             "poster_url",
             "description",
             "release_year",
+            "media_type",
             "tmdb_id",
             "youtube_id",
             "created_at",
