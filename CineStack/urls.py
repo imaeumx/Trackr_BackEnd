@@ -20,8 +20,7 @@ from playlist.views import RegisterView, LoginView
 
 urlpatterns = [
     path('admin/', admin.site.urls),
-    path('api/', include('playlist.urls')),  # API endpoints
-    # Authentication
-    path('api/token/', LoginView.as_view(), name='login'),
-    path('api/register/', RegisterView.as_view(), name='register'),
+    path('api/', include('playlist.urls')),  
+    path('api/auth/login/', LoginView.as_view(), name='login'),
+    path('api/auth/register/', RegisterView.as_view(), name='register'),
 ]
