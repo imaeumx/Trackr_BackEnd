@@ -27,11 +27,10 @@ from .services import (
     get_tmdb_popular,
 )
 
-
 class RegisterView(APIView):
     """
     User registration endpoint.
-    POST /api/register/ - Register a new user and return token
+    POST /api/auth/register/ - Register a new user and return token
     """
     permission_classes = [AllowAny]
 
@@ -53,7 +52,7 @@ class RegisterView(APIView):
 class LoginView(APIView):
     """
     User login endpoint.
-    POST /api/token/ - Login and get token
+    POST /api/auth/login/ - Login and get token
     """
     permission_classes = [AllowAny]
 
@@ -70,17 +69,30 @@ class LoginView(APIView):
         user = authenticate(username=username, password=password)
         
         if user:
-            token, _ = Token.objects.get_or_create(user=user)
+            # Get or create token for the user
+            token, created = Token.objects.get_or_create(user=user)
+            
+            # Return response in the format your frontend expects
             return Response({
                 'access': token.key,
+                'refresh': '',  # Add if you implement refresh tokens
                 'user_id': user.id,
                 'username': user.username,
-            })
+                'email': user.email,
+                'message': 'Login successful'
+            }, status=status.HTTP_200_OK)
         else:
-            return Response(
-                {'error': 'Invalid credentials'},
-                status=status.HTTP_401_UNAUTHORIZED
-            )
+            # Check if user exists to give better error message
+            if User.objects.filter(username=username).exists():
+                return Response(
+                    {'error': 'Invalid password'},
+                    status=status.HTTP_401_UNAUTHORIZED
+                )
+            else:
+                return Response(
+                    {'error': 'User does not exist'},
+                    status=status.HTTP_404_NOT_FOUND
+                )
 
 
 class TMDBSearchView(APIView):
