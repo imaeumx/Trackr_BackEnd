@@ -9,6 +9,7 @@ from .views import (
     TMDBTVDetailView,
     TMDBTVSeasonDetailView,
     TMDBPopularView,
+    get_playlist_items,
 )
 
 # Create a router and register our viewsets
@@ -20,6 +21,8 @@ router.register(r"playlist-items", PlaylistItemViewSet, basename="playlistitem")
 # The API URLs are now determined automatically by the router
 urlpatterns = [
     path("", include(router.urls)),
+    # Playlist items endpoint
+    path("playlists/<int:playlist_id>/items/", get_playlist_items, name="playlist-items"),
     # TMDB proxy endpoints
     path("tmdb/search/", TMDBSearchView.as_view(), name="tmdb-search"),
     path("tmdb/movies/<int:tmdb_id>/", TMDBMovieDetailView.as_view(), name="tmdb-movie-detail"),

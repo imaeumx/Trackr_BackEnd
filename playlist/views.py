@@ -1,5 +1,5 @@
 from rest_framework import viewsets, status, generics
-from rest_framework.decorators import action
+from rest_framework.decorators import action, api_view
 from rest_framework.response import Response
 from rest_framework.permissions import AllowAny, IsAuthenticated
 from rest_framework.views import APIView
@@ -66,33 +66,37 @@ class LoginView(APIView):
                 status=status.HTTP_400_BAD_REQUEST
             )
 
-        user = authenticate(username=username, password=password)
-        
-        if user:
-            # Get or create token for the user
-            token, created = Token.objects.get_or_create(user=user)
+        # Try case-insensitive username lookup
+        try:
+            user = User.objects.get(username__iexact=username)
+            # Authenticate with the actual username from database
+            authenticated_user = authenticate(username=user.username, password=password)
             
-            # Return response in the format your frontend expects
-            return Response({
-                'access': token.key,
-                'refresh': '',  # Add if you implement refresh tokens
-                'user_id': user.id,
-                'username': user.username,
-                'email': user.email,
-                'message': 'Login successful'
-            }, status=status.HTTP_200_OK)
-        else:
-            # Check if user exists to give better error message
-            if User.objects.filter(username=username).exists():
+            if authenticated_user:
+                # Get or create token for the user
+                token, created = Token.objects.get_or_create(user=authenticated_user)
+                
+                # Return response in the format your frontend expects
+                return Response({
+                    'access': token.key,
+                    'refresh': '',  # Add if you implement refresh tokens
+                    'user_id': authenticated_user.id,
+                    'username': authenticated_user.username,
+                    'email': authenticated_user.email,
+                    'message': 'Login successful'
+                }, status=status.HTTP_200_OK)
+            else:
+                # User exists but password is wrong
                 return Response(
                     {'error': 'Invalid password'},
                     status=status.HTTP_401_UNAUTHORIZED
                 )
-            else:
-                return Response(
-                    {'error': 'User does not exist'},
-                    status=status.HTTP_404_NOT_FOUND
-                )
+        except User.DoesNotExist:
+            # User doesn't exist
+            return Response(
+                {'error': 'User does not exist'},
+                status=status.HTTP_404_NOT_FOUND
+            )
 
 
 class TMDBSearchView(APIView):
@@ -284,6 +288,22 @@ class PlaylistViewSet(viewsets.ModelViewSet):
         if self.action == "list":
             return PlaylistListSerializer
         return PlaylistSerializer
+    
+    def destroy(self, request, *args, **kwargs):
+        """Delete a playlist - explicitly defined for clarity."""
+        try:
+            instance = self.get_object()
+            playlist_title = instance.title
+            self.perform_destroy(instance)
+            return Response(
+                {"message": f"Playlist '{playlist_title}' deleted successfully"},
+                status=status.HTTP_200_OK
+            )
+        except Exception as e:
+            return Response(
+                {"error": str(e)},
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR
+            )
 
     @action(detail=True, methods=["post"])
     def add_movie(self, request, pk=None):
@@ -318,9 +338,27 @@ class PlaylistViewSet(viewsets.ModelViewSet):
     def remove_movie(self, request, pk=None, movie_id=None):
         """Remove a movie from this playlist."""
         playlist = self.get_object()
-        item = get_object_or_404(PlaylistItem, playlist=playlist, movie_id=movie_id)
-        item.delete()
-        return Response(status=status.HTTP_204_NO_CONTENT)
+        
+        try:
+            # Try to get the playlist item
+            item = PlaylistItem.objects.get(playlist=playlist, movie_id=movie_id)
+            item.delete()
+            
+            return Response(
+                {"message": f"Movie removed from playlist '{playlist.title}'"},
+                status=status.HTTP_200_OK
+            )
+            
+        except PlaylistItem.DoesNotExist:
+            return Response(
+                {"error": "Movie not found in this playlist"},
+                status=status.HTTP_404_NOT_FOUND
+            )
+        except Exception as e:
+            return Response(
+                {"error": str(e)},
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR
+            )
 
     @action(detail=True, methods=["patch"], url_path="update_item_status/(?P<movie_id>[^/.]+)")
     def update_item_status(self, request, pk=None, movie_id=None):
@@ -350,3 +388,11 @@ class PlaylistItemViewSet(viewsets.ModelViewSet):
     queryset = PlaylistItem.objects.select_related("movie", "playlist").all()
     serializer_class = PlaylistItemSerializer
 
+
+@api_view(['GET'])
+def get_playlist_items(request, playlist_id):
+    """Get all items in a playlist."""
+    playlist = get_object_or_404(Playlist, id=playlist_id)
+    items = PlaylistItem.objects.filter(playlist=playlist).select_related('movie')
+    serializer = PlaylistItemSerializer(items, many=True)
+    return Response(serializer.data)
