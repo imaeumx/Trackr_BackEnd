@@ -122,6 +122,25 @@ def get_tmdb_popular(media_type: str = "movie", page: int = 1) -> dict:
     return data
 
 
+def get_tmdb_top_rated(media_type: str = "movie", page: int = 1) -> dict:
+    """Fetch top-rated movies or TV shows from TMDB."""
+    api_key, base, _ = _get_tmdb_config()
+    normalized_type = (media_type or "movie").lower()
+    if normalized_type not in {"movie", "tv"}:
+        normalized_type = "movie"
+
+    endpoint = "movie/top_rated" if normalized_type == "movie" else "tv/top_rated"
+    url = f"{base}/{endpoint}"
+    params = {"api_key": api_key, "page": page}
+    resp = requests.get(url, params=params, timeout=10)
+    resp.raise_for_status()
+    data = resp.json()
+    for item in data.get("results", []):
+        item.setdefault("media_type", normalized_type)
+    data["selected_media_type"] = normalized_type
+    return data
+
+
 def get_or_create_movie_from_tmdb(tmdb_id: int, media_type: str = Movie.MediaType.MOVIE) -> Tuple[Movie, bool]:
     """Get or create a local Movie/TV show by TMDB id and media type."""
 

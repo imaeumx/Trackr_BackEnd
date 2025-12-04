@@ -9,6 +9,7 @@ from .views import (
     TMDBTVDetailView,
     TMDBTVSeasonDetailView,
     TMDBPopularView,
+    TMDBTopRatedView,
     get_playlist_items,
 )
 
@@ -33,4 +34,5 @@ urlpatterns = [
         name="tmdb-tv-season-detail",
     ),
     path("tmdb/popular/", TMDBPopularView.as_view(), name="tmdb-popular"),
+    path("tmdb/top-rated/", TMDBTopRatedView.as_view(), name="tmdb-top-rated"),
 ]

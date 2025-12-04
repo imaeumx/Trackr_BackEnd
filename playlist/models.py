@@ -1,5 +1,6 @@
 from django.db import models
 from django.db.models import Q
+from django.contrib.auth.models import User
 from django.utils import timezone
 
 
@@ -42,6 +43,11 @@ class Movie(models.Model):
 class Playlist(models.Model):
     """Playlist/Watchlist - core CRUD entity for the mobile app."""
 
+    user = models.ForeignKey(
+        User,
+        on_delete=models.CASCADE,
+        related_name='playlists'
+    )
     title = models.CharField(max_length=255)
     description = models.TextField(blank=True, default="")
     movies = models.ManyToManyField(
@@ -55,6 +61,12 @@ class Playlist(models.Model):
 
     class Meta:
         ordering = ["-updated_at"]
+        constraints = [
+            models.UniqueConstraint(
+                fields=['user', 'title'],
+                name='unique_playlist_per_user'
+            )
+        ]
 
     def __str__(self) -> str:
         return self.title
@@ -96,6 +108,11 @@ class PlaylistItem(models.Model):
         max_length=32,
         choices=Status.choices,
         default=Status.TO_WATCH
+    )
+    user_rating = models.PositiveSmallIntegerField(
+        blank=True,
+        null=True,
+        help_text="User rating from 1-5 stars"
     )
     added_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)

@@ -25,6 +25,7 @@ from .services import (
     get_tmdb_tv_details,
     get_tmdb_tv_season_details,
     get_tmdb_popular,
+    get_tmdb_top_rated,
 )
 
 class RegisterView(APIView):
@@ -208,6 +209,29 @@ class TMDBPopularView(APIView):
             )
 
 
+class TMDBTopRatedView(APIView):
+    """Proxy endpoint for TMDB top-rated movies/TV shows."""
+    permission_classes = [AllowAny]
+
+    def get(self, request):
+        media_type = request.query_params.get("type", "movie")
+        page = request.query_params.get("page", 1)
+
+        try:
+            page = int(page)
+        except (ValueError, TypeError):
+            page = 1
+
+        try:
+            results = get_tmdb_top_rated(media_type, page)
+            return Response(results)
+        except Exception as e:
+            return Response(
+                {"error": str(e)},
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR
+            )
+
+
 class MovieViewSet(viewsets.ModelViewSet):
     """
     API endpoint for Movie CRUD operations.
@@ -270,18 +294,27 @@ class PlaylistViewSet(viewsets.ModelViewSet):
     """
     API endpoint for Playlist CRUD operations.
     
-    GET /api/playlists/ - List all playlists
-    POST /api/playlists/ - Create a playlist
-    GET /api/playlists/{id}/ - Get playlist detail with movies
-    PUT /api/playlists/{id}/ - Update playlist
-    DELETE /api/playlists/{id}/ - Delete playlist
+    GET /api/playlists/ - List all user playlists (requires auth)
+    POST /api/playlists/ - Create a playlist (requires auth)
+    GET /api/playlists/{id}/ - Get playlist detail with movies (requires auth)
+    PUT /api/playlists/{id}/ - Update playlist (requires auth)
+    DELETE /api/playlists/{id}/ - Delete playlist (requires auth)
     
     Custom Actions:
     POST /api/playlists/{id}/add_movie/ - Add a movie to playlist
     DELETE /api/playlists/{id}/remove_movie/ - Remove a movie from playlist
     PATCH /api/playlists/{id}/update_item_status/ - Update movie status in playlist
     """
-    queryset = Playlist.objects.all()
+    serializer_class = PlaylistSerializer
+    permission_classes = [IsAuthenticated]
+
+    def get_queryset(self):
+        """Return only current user's playlists - exclude any orphaned playlists."""
+        return Playlist.objects.filter(user=self.request.user, user__isnull=False)
+
+    def perform_create(self, serializer):
+        """Assign current user to new playlist."""
+        serializer.save(user=self.request.user)
 
     def get_serializer_class(self):
         """Use lightweight serializer for list view, full serializer for detail."""
@@ -370,6 +403,37 @@ class PlaylistViewSet(viewsets.ModelViewSet):
         serializer.is_valid(raise_exception=True)
 
         item.status = serializer.validated_data["status"]
+        item.save()
+
+        return Response(PlaylistItemSerializer(item).data)
+
+    @action(detail=True, methods=["patch"], url_path="update_item_rating/(?P<movie_id>[^/.]+)")
+    def update_item_rating(self, request, pk=None, movie_id=None):
+        """Update a movie's user rating in this playlist."""
+        playlist = self.get_object()
+        item = get_object_or_404(PlaylistItem, playlist=playlist, movie_id=movie_id)
+
+        rating = request.data.get('rating')
+        if rating is None:
+            return Response(
+                {"error": "Rating is required"},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        try:
+            rating = int(rating)
+            if rating < 1 or rating > 5:
+                return Response(
+                    {"error": "Rating must be between 1 and 5"},
+                    status=status.HTTP_400_BAD_REQUEST
+                )
+        except (ValueError, TypeError):
+            return Response(
+                {"error": "Invalid rating value"},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        item.user_rating = rating
         item.save()
 
         return Response(PlaylistItemSerializer(item).data)

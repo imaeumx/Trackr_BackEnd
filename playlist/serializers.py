@@ -71,6 +71,7 @@ class PlaylistItemSerializer(serializers.ModelSerializer):
             "movie_id",
             "status",
             "status_display",
+            "user_rating",
             "added_at",
             "updated_at",
         ]
@@ -82,11 +83,13 @@ class PlaylistSerializer(serializers.ModelSerializer):
     items = PlaylistItemSerializer(many=True, read_only=True)
     movie_count = serializers.IntegerField(read_only=True)
     watched_count = serializers.IntegerField(read_only=True)
+    user = serializers.PrimaryKeyRelatedField(read_only=True)
 
     class Meta:
         model = Playlist
         fields = [
             "id",
+            "user",
             "title",
             "description",
             "movie_count",
@@ -95,7 +98,7 @@ class PlaylistSerializer(serializers.ModelSerializer):
             "created_at",
             "updated_at",
         ]
-        read_only_fields = ["id", "created_at", "updated_at", "movie_count", "watched_count"]
+        read_only_fields = ["id", "created_at", "updated_at", "movie_count", "watched_count", "user"]
 
 class PlaylistListSerializer(serializers.ModelSerializer):
     """Lightweight serializer for listing playlists (without nested items)."""
