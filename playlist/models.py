@@ -50,6 +50,10 @@ class Playlist(models.Model):
     )
     title = models.CharField(max_length=255)
     description = models.TextField(blank=True, default="")
+    is_status_playlist = models.BooleanField(
+        default=False,
+        help_text="True for automatic Watched/Watching/To Watch playlists"
+    )
     movies = models.ManyToManyField(
         Movie,
         through="PlaylistItem",

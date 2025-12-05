@@ -11,6 +11,11 @@ from .views import (
     TMDBPopularView,
     TMDBTopRatedView,
     get_playlist_items,
+    RequestPasswordResetView,
+    VerifyResetCodeView,
+    ResetPasswordView,
+    RequestChangePasswordCodeView,
+    ChangePasswordView,
 )
 
 # Create a router and register our viewsets
@@ -35,4 +40,11 @@ urlpatterns = [
     ),
     path("tmdb/popular/", TMDBPopularView.as_view(), name="tmdb-popular"),
     path("tmdb/top-rated/", TMDBTopRatedView.as_view(), name="tmdb-top-rated"),
+    # Password reset endpoints
+    path("auth/password-reset/request/", RequestPasswordResetView.as_view(), name="password-reset-request"),
+    path("auth/password-reset/verify/", VerifyResetCodeView.as_view(), name="password-reset-verify"),
+    path("auth/password-reset/confirm/", ResetPasswordView.as_view(), name="password-reset-confirm"),
+    # Change password endpoints (authenticated)
+    path("auth/change-password/request/", RequestChangePasswordCodeView.as_view(), name="change-password-request"),
+    path("auth/change-password/", ChangePasswordView.as_view(), name="change-password"),
 ]

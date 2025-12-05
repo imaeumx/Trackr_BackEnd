@@ -7,6 +7,12 @@ from rest_framework.authtoken.models import Token
 from django.shortcuts import get_object_or_404
 from django.contrib.auth.models import User
 from django.contrib.auth import authenticate
+from django.core.mail import send_mail
+from django.conf import settings
+from django.utils import timezone
+from django.core.cache import cache
+import random
+import string
 
 from .models import Movie, Playlist, PlaylistItem
 from .serializers import (
@@ -41,6 +47,10 @@ class RegisterView(APIView):
             user = serializer.save()
             # Create token for the new user
             token, _ = Token.objects.get_or_create(user=user)
+            
+            # Create automatic status playlists for new user
+            self.create_status_playlists(user)
+            
             return Response({
                 'access': token.key,
                 'user_id': user.id,
@@ -48,6 +58,33 @@ class RegisterView(APIView):
                 'message': 'Registration successful'
             }, status=status.HTTP_201_CREATED)
         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+    
+    def create_status_playlists(self, user):
+        """Create automatic status playlists for user"""
+        status_playlists = [
+            {
+                'title': 'Watched',
+                'description': 'Movies and series I have watched'
+            },
+            {
+                'title': 'Watching',
+                'description': 'Movies and series I am currently watching'
+            },
+            {
+                'title': 'To Watch',
+                'description': 'Movies and series I want to watch'
+            }
+        ]
+        
+        for pl_data in status_playlists:
+            Playlist.objects.get_or_create(
+                user=user,
+                title=pl_data['title'],
+                defaults={
+                    'description': pl_data['description'],
+                    'is_status_playlist': True
+                }
+            )
 
 
 class LoginView(APIView):
@@ -309,7 +346,7 @@ class PlaylistViewSet(viewsets.ModelViewSet):
     permission_classes = [IsAuthenticated]
 
     def get_queryset(self):
-        """Return only current user's playlists - exclude any orphaned playlists."""
+        """Return only current user's playlists - exclude any orphaned playlists and status playlists."""
         return Playlist.objects.filter(user=self.request.user, user__isnull=False)
 
     def perform_create(self, serializer):
@@ -321,6 +358,16 @@ class PlaylistViewSet(viewsets.ModelViewSet):
         if self.action == "list":
             return PlaylistListSerializer
         return PlaylistSerializer
+    
+    @action(detail=False, methods=["get"])
+    def user_playlists(self, request):
+        """Get only user-created playlists (exclude status playlists)."""
+        user_playlists = Playlist.objects.filter(
+            user=request.user,
+            is_status_playlist=False
+        )
+        serializer = PlaylistListSerializer(user_playlists, many=True)
+        return Response(serializer.data)
     
     def destroy(self, request, *args, **kwargs):
         """Delete a playlist - explicitly defined for clarity."""
@@ -362,6 +409,11 @@ class PlaylistViewSet(viewsets.ModelViewSet):
             movie=movie,
             status=status_value
         )
+        
+        # Automatically organize into status playlists based on watch status
+        # This only affects the 3 system playlists, not user's custom playlists
+        self.move_to_status_playlist(playlist.user, movie, status_value)
+        
         return Response(
             PlaylistItemSerializer(item).data,
             status=status.HTTP_201_CREATED
@@ -395,17 +447,72 @@ class PlaylistViewSet(viewsets.ModelViewSet):
 
     @action(detail=True, methods=["patch"], url_path="update_item_status/(?P<movie_id>[^/.]+)")
     def update_item_status(self, request, pk=None, movie_id=None):
-        """Update a movie's watch status in this playlist."""
+        """Update a movie's watch status in this playlist and auto-move to status playlist."""
         playlist = self.get_object()
         item = get_object_or_404(PlaylistItem, playlist=playlist, movie_id=movie_id)
 
         serializer = UpdatePlaylistItemStatusSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
 
-        item.status = serializer.validated_data["status"]
+        new_status = serializer.validated_data["status"]
+        old_status = item.status
+        
+        item.status = new_status
         item.save()
+        
+        # Auto-move to corresponding status playlist
+        if new_status:  # If status is set (not empty)
+            self.move_to_status_playlist(playlist.user, item.movie, new_status)
 
         return Response(PlaylistItemSerializer(item).data)
+    
+    def move_to_status_playlist(self, user, movie, status):
+        """Move movie to the corresponding status playlist"""
+        status_playlist_map = {
+            'watched': 'Watched',
+            'watching': 'Watching',
+            'to_watch': 'To Watch'
+        }
+        
+        if status not in status_playlist_map:
+            return
+        
+        target_playlist_name = status_playlist_map[status]
+        
+        # Get or create the target status playlist
+        target_playlist, created = Playlist.objects.get_or_create(
+            user=user,
+            title=target_playlist_name,
+            defaults={
+                'description': f'Movies and series I {status.replace("_", " ")}',
+                'is_status_playlist': True
+            }
+        )
+        
+        # Ensure the playlist is marked as status playlist
+        if not created and not target_playlist.is_status_playlist:
+            target_playlist.is_status_playlist = True
+            target_playlist.save()
+        
+        # Remove from all other status playlists
+        status_playlists = Playlist.objects.filter(
+            user=user,
+            title__in=['Watched', 'Watching', 'To Watch']
+        ).exclude(id=target_playlist.id)
+        
+        for pl in status_playlists:
+            PlaylistItem.objects.filter(playlist=pl, movie=movie).delete()
+        
+        # Add to target status playlist (if not already there)
+        item, created = PlaylistItem.objects.get_or_create(
+            playlist=target_playlist,
+            movie=movie,
+            defaults={'status': status}
+        )
+        
+        if not created:
+            item.status = status
+            item.save()
 
     @action(detail=True, methods=["patch"], url_path="update_item_rating/(?P<movie_id>[^/.]+)")
     def update_item_rating(self, request, pk=None, movie_id=None):
@@ -460,3 +567,324 @@ def get_playlist_items(request, playlist_id):
     items = PlaylistItem.objects.filter(playlist=playlist).select_related('movie')
     serializer = PlaylistItemSerializer(items, many=True)
     return Response(serializer.data)
+
+
+def generate_verification_code():
+    """Generate a 6-digit verification code."""
+    return ''.join(random.choices(string.digits, k=6))
+
+
+class RequestPasswordResetView(APIView):
+    """
+    Request password reset code.
+    POST /api/auth/password-reset/request/ - Send verification code to email
+    """
+    permission_classes = [AllowAny]
+
+    def post(self, request):
+        email = request.data.get('email', '').strip()
+        
+        if not email:
+            return Response(
+                {'error': 'Email is required'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+        
+        try:
+            user = User.objects.get(email__iexact=email)
+        except User.DoesNotExist:
+            return Response(
+                {'error': 'No account found with this email address'},
+                status=status.HTTP_404_NOT_FOUND
+            )
+        
+        # Generate verification code
+        code = generate_verification_code()
+        
+        # Store code in cache with 10-minute expiration
+        cache_key = f'password_reset_{user.id}'
+        cache.set(cache_key, code, settings.PASSWORD_RESET_TIMEOUT)
+        
+        # Check if email is configured
+        if not settings.EMAIL_HOST_USER or not settings.EMAIL_HOST_PASSWORD:
+            # For development: return code in response (REMOVE IN PRODUCTION!)
+            return Response({
+                'message': 'Email not configured. Development mode: code shown in response',
+                'user_id': user.id,
+                'dev_code': code,  # Only for development!
+                'warning': 'Configure EMAIL_HOST_USER and EMAIL_HOST_PASSWORD environment variables'
+            }, status=status.HTTP_200_OK)
+        
+        # Send email
+        try:
+            subject = 'TrackR - Password Reset Code'
+            message = f"""
+Hello {user.username},
+
+You requested to reset your password for your TrackR account.
+
+Your verification code is: {code}
+
+This code will expire in 10 minutes.
+
+If you didn't request this, please ignore this email.
+
+Best regards,
+TrackR Team
+            """
+            send_mail(
+                subject,
+                message,
+                settings.DEFAULT_FROM_EMAIL,
+                [user.email],
+                fail_silently=False,
+            )
+            
+            return Response({
+                'message': 'Verification code sent to your email',
+                'user_id': user.id
+            }, status=status.HTTP_200_OK)
+            
+        except Exception as e:
+            # Log the error for debugging
+            import traceback
+            print(f"Email sending error: {str(e)}")
+            print(traceback.format_exc())
+            
+            return Response(
+                {'error': f'Failed to send email. Please check server email configuration. Error: {str(e)}'},
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR
+            )
+
+
+class VerifyResetCodeView(APIView):
+    """
+    Verify password reset code.
+    POST /api/auth/password-reset/verify/ - Verify the code
+    """
+    permission_classes = [AllowAny]
+
+    def post(self, request):
+        user_id = request.data.get('user_id')
+        code = request.data.get('code', '').strip()
+        
+        if not user_id or not code:
+            return Response(
+                {'error': 'User ID and code are required'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+        
+        cache_key = f'password_reset_{user_id}'
+        stored_code = cache.get(cache_key)
+        
+        if not stored_code:
+            return Response(
+                {'error': 'Code expired or invalid. Please request a new one'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+        
+        if stored_code != code:
+            return Response(
+                {'error': 'Invalid verification code'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+        
+        # Mark code as verified (store with different key)
+        verified_key = f'password_reset_verified_{user_id}'
+        cache.set(verified_key, True, 600)  # 10 minutes to complete reset
+        
+        return Response({
+            'message': 'Code verified successfully'
+        }, status=status.HTTP_200_OK)
+
+
+class ResetPasswordView(APIView):
+    """
+    Reset password after verification.
+    POST /api/auth/password-reset/confirm/ - Set new password
+    """
+    permission_classes = [AllowAny]
+
+    def post(self, request):
+        user_id = request.data.get('user_id')
+        new_password = request.data.get('new_password')
+        
+        if not user_id or not new_password:
+            return Response(
+                {'error': 'User ID and new password are required'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+        
+        if len(new_password) < 8:
+            return Response(
+                {'error': 'Password must be at least 8 characters long'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+        
+        # Check if code was verified
+        verified_key = f'password_reset_verified_{user_id}'
+        if not cache.get(verified_key):
+            return Response(
+                {'error': 'Please verify your code first'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+        
+        try:
+            user = User.objects.get(id=user_id)
+            user.set_password(new_password)
+            user.save()
+            
+            # Clear cache keys
+            cache.delete(f'password_reset_{user_id}')
+            cache.delete(verified_key)
+            
+            return Response({
+                'message': 'Password reset successfully'
+            }, status=status.HTTP_200_OK)
+            
+        except User.DoesNotExist:
+            return Response(
+                {'error': 'User not found'},
+                status=status.HTTP_404_NOT_FOUND
+            )
+
+
+class RequestChangePasswordCodeView(APIView):
+    """
+    Request verification code for changing password (authenticated users).
+    POST /api/auth/change-password/request/ - Send code to user's email
+    """
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request):
+        user = request.user
+        
+        if not user.email:
+            return Response(
+                {'error': 'No email address associated with your account'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+        
+        # Generate verification code
+        code = generate_verification_code()
+        
+        # Store code in cache
+        cache_key = f'change_password_{user.id}'
+        cache.set(cache_key, code, settings.PASSWORD_RESET_TIMEOUT)
+        
+        # Check if email is configured
+        if not settings.EMAIL_HOST_USER or not settings.EMAIL_HOST_PASSWORD:
+            # For development: return code in response (REMOVE IN PRODUCTION!)
+            return Response({
+                'message': 'Email not configured. Development mode: code shown in response',
+                'email': user.email,
+                'dev_code': code,  # Only for development!
+                'warning': 'Configure EMAIL_HOST_USER and EMAIL_HOST_PASSWORD environment variables'
+            }, status=status.HTTP_200_OK)
+        
+        # Send email
+        try:
+            subject = 'TrackR - Change Password Verification Code'
+            message = f"""
+Hello {user.username},
+
+You requested to change your password for your TrackR account.
+
+Your verification code is: {code}
+
+This code will expire in 10 minutes.
+
+If you didn't request this, please secure your account immediately.
+
+Best regards,
+TrackR Team
+            """
+            send_mail(
+                subject,
+                message,
+                settings.DEFAULT_FROM_EMAIL,
+                [user.email],
+                fail_silently=False,
+            )
+            
+            return Response({
+                'message': 'Verification code sent to your email',
+                'email': user.email
+            }, status=status.HTTP_200_OK)
+            
+        except Exception as e:
+            # Log the error for debugging
+            import traceback
+            print(f"Email sending error: {str(e)}")
+            print(traceback.format_exc())
+            
+            return Response(
+                {'error': f'Failed to send email. Please check server email configuration. Error: {str(e)}'},
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR
+            )
+
+
+class ChangePasswordView(APIView):
+    """
+    Change password with verification code (authenticated users).
+    POST /api/auth/change-password/ - Change password
+    """
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request):
+        user = request.user
+        code = request.data.get('code', '').strip()
+        current_password = request.data.get('current_password')
+        new_password = request.data.get('new_password')
+        
+        if not code or not current_password or not new_password:
+            return Response(
+                {'error': 'Code, current password, and new password are required'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+        
+        # Verify current password
+        if not user.check_password(current_password):
+            return Response(
+                {'error': 'Current password is incorrect'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+        
+        # Verify code
+        cache_key = f'change_password_{user.id}'
+        stored_code = cache.get(cache_key)
+        
+        if not stored_code:
+            return Response(
+                {'error': 'Code expired or invalid. Please request a new one'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+        
+        if stored_code != code:
+            return Response(
+                {'error': 'Invalid verification code'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+        
+        if len(new_password) < 8:
+            return Response(
+                {'error': 'New password must be at least 8 characters long'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+        
+        # Change password
+        user.set_password(new_password)
+        user.save()
+        
+        # Clear cache
+        cache.delete(cache_key)
+        
+        # Regenerate token for security
+        Token.objects.filter(user=user).delete()
+        new_token = Token.objects.create(user=user)
+        
+        return Response({
+            'message': 'Password changed successfully',
+            'access': new_token.key
+        }, status=status.HTTP_200_OK)
+

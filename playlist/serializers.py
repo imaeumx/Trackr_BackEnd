@@ -92,13 +92,14 @@ class PlaylistSerializer(serializers.ModelSerializer):
             "user",
             "title",
             "description",
+            "is_status_playlist",
             "movie_count",
             "watched_count",
             "items",
             "created_at",
             "updated_at",
         ]
-        read_only_fields = ["id", "created_at", "updated_at", "movie_count", "watched_count", "user"]
+        read_only_fields = ["id", "created_at", "updated_at", "movie_count", "watched_count", "user", "is_status_playlist"]
 
 class PlaylistListSerializer(serializers.ModelSerializer):
     """Lightweight serializer for listing playlists (without nested items)."""
@@ -112,12 +113,13 @@ class PlaylistListSerializer(serializers.ModelSerializer):
             "id",
             "title",
             "description",
+            "is_status_playlist",
             "movie_count",
             "watched_count",
             "created_at",
             "updated_at",
         ]
-        read_only_fields = ["id", "created_at", "updated_at"]
+        read_only_fields = ["id", "created_at", "updated_at", "is_status_playlist"]
 
 class AddMovieToPlaylistSerializer(serializers.Serializer):
     """Serializer for adding a movie to a playlist."""
