@@ -12,7 +12,8 @@ from rest_framework.views import APIView
 from django.shortcuts import get_object_or_404
 from django.contrib.auth import authenticate
 from django.db.models import Q
-from django.core.mail import send_mail
+import os
+from resend import Emails
 from django.conf import settings
 from django.utils import timezone
 
@@ -69,14 +70,15 @@ def simple_change_password_request(request):
             "If you didn't request this, please secure your account immediately.\n\n"
             "Best regards,\nTrackR Team"
         )
-        send_mail(
-            subject,
-            message,
-            settings.DEFAULT_FROM_EMAIL,
-            [user.email],
-            fail_silently=True,
-        )
-        email_sent = True
+        resend_api_key = os.environ.get('RESEND_API_KEY')
+        email_params = {
+            "from": settings.DEFAULT_FROM_EMAIL,
+            "to": [user.email],
+            "subject": subject,
+            "text": message,
+        }
+        response = Emails.send(api_key=resend_api_key, **email_params)
+        email_sent = response.get('id') is not None
     except Exception as e:
         email_sent = False
         import traceback
@@ -289,17 +291,24 @@ class RequestPasswordResetView(APIView):
                 "If you didn't request this, please ignore this email.\n\n"
                 "Best regards,\nTrackR Trio"
             )
-            send_mail(
-                subject,
-                message,
-                settings.DEFAULT_FROM_EMAIL,
-                [user.email],
-                fail_silently=False,
-            )
-            return Response({
-                'message': 'Verification code sent to your email',
-                'user_id': user.id
-            }, status=status.HTTP_200_OK)
+            resend_api_key = os.environ.get('RESEND_API_KEY')
+            resend = Emails(api_key=resend_api_key)
+            response = resend.emails.send({
+                "from": settings.DEFAULT_FROM_EMAIL,
+                "to": [user.email],
+                "subject": subject,
+                "text": message,
+            })
+            if response.get('id'):
+                return Response({
+                    'message': 'Verification code sent to your email',
+                    'user_id': user.id
+                }, status=status.HTTP_200_OK)
+            else:
+                return Response(
+                    {'error': 'Failed to send email.'},
+                    status=status.HTTP_500_INTERNAL_SERVER_ERROR
+                )
         except Exception as e:
             import traceback
             print(f"Email sending error: {str(e)}")
