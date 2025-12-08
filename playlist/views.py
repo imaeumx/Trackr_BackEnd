@@ -70,13 +70,13 @@ def simple_change_password_request(request):
             "If you didn't request this, please secure your account immediately.\n\n"
             "Best regards,\nTrackR Team"
         )
-        email_params = {
-            "from": settings.DEFAULT_FROM_EMAIL,
-            "to": [user.email],
-            "subject": subject,
-            "text": message,
-        }
-        response = Emails.send(**email_params)
+        from_email = f"TrackR <{settings.DEFAULT_FROM_EMAIL}>"
+        response = Emails.send(
+            from_=from_email,
+            to=[user.email],
+            subject=subject,
+            text=message
+        )
         email_sent = response.get('id') is not None
     except Exception as e:
         email_sent = False
@@ -290,14 +290,13 @@ class RequestPasswordResetView(APIView):
                 "If you didn't request this, please ignore this email.\n\n"
                 "Best regards,\nTrackR Trio"
             )
-            resend_api_key = os.environ.get('RESEND_API_KEY')
-            resend = Emails(api_key=resend_api_key)
-            response = resend.emails.send({
-                "from": settings.DEFAULT_FROM_EMAIL,
-                "to": [user.email],
-                "subject": subject,
-                "text": message,
-            })
+            from_email = f"TrackR <{settings.DEFAULT_FROM_EMAIL}>"
+            response = Emails.send(
+                from_=from_email,
+                to=[user.email],
+                subject=subject,
+                text=message
+            )
             if response.get('id'):
                 return Response({
                     'message': 'Verification code sent to your email',
