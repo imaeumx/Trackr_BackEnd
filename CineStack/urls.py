@@ -20,5 +20,5 @@ urlpatterns = [
     path('', home, name='home'),
     path('admin/', admin.site.urls),
     path('api/auth/', include('rest_framework.urls')),  # DRF auth endpoints
-    # path('api/', include('playlist.urls')),  # Uncomment when ready
+    path('api/', include('playlist.urls')),  # Expose all playlist endpoints
 ]

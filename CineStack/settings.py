@@ -59,15 +59,15 @@ MIDDLEWARE = [
     'whitenoise.middleware.WhiteNoiseMiddleware',  # For static files on Render
     'django.contrib.sessions.middleware.SessionMiddleware',
     'django.middleware.common.CommonMiddleware',
-    'django.middleware.csrf.CsrfViewMiddleware',
+    # 'django.middleware.csrf.CsrfViewMiddleware',  # REMOVED for pure API/mobile
     'django.contrib.auth.middleware.AuthenticationMiddleware',
     'django.contrib.messages.middleware.MessageMiddleware',
     'django.middleware.clickjacking.XFrameOptionsMiddleware',
 ]
 
 ## CORS Configuration
-CORS_ALLOW_ALL_ORIGINS = True  # Keep this for Snack testing
-CORS_ALLOW_CREDENTIALS = True
+CORS_ALLOW_ALL_ORIGINS = True  # Allow all (safe for development)
+CORS_ALLOW_CREDENTIALS = False  # Set to FALSE for token auth only
 CORS_ALLOW_HEADERS = [
     'accept',
     'accept-encoding',
@@ -115,10 +115,11 @@ CSRF_TRUSTED_ORIGINS = [
 # Django REST Framework Configuration
 REST_FRAMEWORK = {
     'DEFAULT_AUTHENTICATION_CLASSES': [
-        'rest_framework.authentication.TokenAuthentication',
+        'rest_framework.authentication.TokenAuthentication',  # TOKEN ONLY
+        # Do NOT add SessionAuthentication!
     ],
     'DEFAULT_PERMISSION_CLASSES': [
-        'rest_framework.permissions.AllowAny',  # Allow all for now
+        'rest_framework.permissions.AllowAny',
     ],
     'DEFAULT_PAGINATION_CLASS': 'rest_framework.pagination.PageNumberPagination',
     'PAGE_SIZE': 20,

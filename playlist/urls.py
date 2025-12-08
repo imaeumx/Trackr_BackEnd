@@ -17,9 +17,10 @@ from .views import (
     RequestPasswordResetView,
     VerifyResetCodeView,
     ResetPasswordView,
-    RequestChangePasswordCodeView,
     ChangePasswordView,
 )
+
+from .views import LoginView, RegisterView
 
 # Create a router and register our viewsets
 router = DefaultRouter()
@@ -32,6 +33,9 @@ router.register(r"episode-progress", EpisodeProgressViewSet, basename="episodepr
 
 # The API URLs are now determined automatically by the router
 urlpatterns = [
+    # Simple CSRF-free endpoints
+    # path('simple-login/', simple_login, name='simple-login'),
+    # path('simple-register/', simple_register, name='simple-register'),
     path("", include(router.urls)),
     # Playlist items endpoint
     path("playlists/<int:playlist_id>/items/", get_playlist_items, name="playlist-items"),
@@ -51,6 +55,9 @@ urlpatterns = [
     path("auth/password-reset/verify/", VerifyResetCodeView.as_view(), name="password-reset-verify"),
     path("auth/password-reset/confirm/", ResetPasswordView.as_view(), name="password-reset-confirm"),
     # Change password endpoints (authenticated)
-    path("auth/change-password/request/", RequestChangePasswordCodeView.as_view(), name="change-password-request"),
+    # path("auth/change-password/request/", RequestChangePasswordCodeView.as_view(), name="change-password-request"),
     path("auth/change-password/", ChangePasswordView.as_view(), name="change-password"),
+    # Only use custom login/register endpoints (no DRF session auth)
+    path('auth/login/', LoginView.as_view(), name='login'),
+    path('auth/register/', RegisterView.as_view(), name='register'),
 ]
