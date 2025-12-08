@@ -1,3 +1,4 @@
+from .views import simple_change_password_request, simple_change_password
 from django.urls import path, include
 from rest_framework.routers import DefaultRouter
 from .views import (
@@ -17,10 +18,10 @@ from .views import (
     RequestPasswordResetView,
     VerifyResetCodeView,
     ResetPasswordView,
-    ChangePasswordView,
+    LoginView,
+    RegisterView
 )
 
-from .views import LoginView, RegisterView
 
 # Create a router and register our viewsets
 router = DefaultRouter()
@@ -54,9 +55,9 @@ urlpatterns = [
     path("auth/password-reset/request/", RequestPasswordResetView.as_view(), name="password-reset-request"),
     path("auth/password-reset/verify/", VerifyResetCodeView.as_view(), name="password-reset-verify"),
     path("auth/password-reset/confirm/", ResetPasswordView.as_view(), name="password-reset-confirm"),
-    # Change password endpoints (authenticated)
-    # path("auth/change-password/request/", RequestChangePasswordCodeView.as_view(), name="change-password-request"),
-    path("auth/change-password/", ChangePasswordView.as_view(), name="change-password"),
+    # USE SIMPLE CHANGE PASSWORD ENDPOINTS ONLY
+    path("auth/change-password/request/", simple_change_password_request, name="change-password-request"),
+    path("auth/change-password/", simple_change_password, name="change-password"),
     # Only use custom login/register endpoints (no DRF session auth)
     path('auth/login/', LoginView.as_view(), name='login'),
     path('auth/register/', RegisterView.as_view(), name='register'),

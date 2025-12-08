@@ -1,3 +1,93 @@
+import random
+import string
+from django.views.decorators.csrf import csrf_exempt
+from rest_framework.decorators import api_view, permission_classes
+from rest_framework.permissions import IsAuthenticated
+from rest_framework.response import Response
+from rest_framework import status
+from django.core.cache import cache
+from django.contrib.auth import get_user_model
+from rest_framework.authtoken.models import Token
+
+User = get_user_model()
+from django.views.decorators.csrf import csrf_exempt
+
+# SIMPLE CHANGE PASSWORD ENDPOINTS (temporary for deployment)
+from rest_framework.decorators import api_view, permission_classes
+
+@api_view(['POST'])
+@permission_classes([IsAuthenticated])
+@csrf_exempt
+def simple_change_password_request(request):
+    """Simple change password request - returns code in response"""
+    user = request.user
+    if not user.email:
+        return Response(
+            {'error': 'No email address associated with your account'},
+            status=status.HTTP_400_BAD_REQUEST
+        )
+    # Generate code
+    code = ''.join(random.choices(string.digits, k=6))
+    cache_key = f'change_password_{user.id}'
+    cache.set(cache_key, code, 600)  # 10 minutes
+    # For development: return code in response
+    return Response({
+        'message': 'Change password code generated',
+        'email': user.email,
+        'code': code,  # Return code in response for development
+        'user_id': user.id
+    })
+
+@api_view(['POST'])
+@permission_classes([IsAuthenticated])
+@csrf_exempt
+def simple_change_password(request):
+    """Simple change password with code"""
+    user = request.user
+    code = request.data.get('code', '').strip()
+    current_password = request.data.get('current_password')
+    new_password = request.data.get('new_password')
+    if not code or not current_password or not new_password:
+        return Response(
+            {'error': 'Code, current password, and new password are required'},
+            status=status.HTTP_400_BAD_REQUEST
+        )
+    # Verify current password
+    if not user.check_password(current_password):
+        return Response(
+            {'error': 'Current password is incorrect'},
+            status=status.HTTP_400_BAD_REQUEST
+        )
+    # Verify code
+    cache_key = f'change_password_{user.id}'
+    stored_code = cache.get(cache_key)
+    if not stored_code:
+        return Response(
+            {'error': 'Code expired or invalid. Please request a new one'},
+            status=status.HTTP_400_BAD_REQUEST
+        )
+    if stored_code != code:
+        return Response(
+            {'error': 'Invalid verification code'},
+            status=status.HTTP_400_BAD_REQUEST
+        )
+    if len(new_password) < 8:
+        return Response(
+            {'error': 'New password must be at least 8 characters long'},
+            status=status.HTTP_400_BAD_REQUEST
+        )
+    # Change password
+    user.set_password(new_password)
+    user.save()
+    # Clear cache
+    cache.delete(cache_key)
+    # Regenerate token
+    Token.objects.filter(user=user).delete()
+    new_token = Token.objects.create(user=user)
+    return Response({
+        'message': 'Password changed successfully',
+        'access': new_token.key
+    })
 from rest_framework import viewsets, status, generics
 from rest_framework.decorators import action, api_view
 from rest_framework.response import Response
