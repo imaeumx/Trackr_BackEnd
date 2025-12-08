@@ -41,27 +41,27 @@ if 'trackr-backend-esiv.onrender.com' not in ALLOWED_HOSTS:
 # Application definition
 
 INSTALLED_APPS = [
-    'django.contrib.admin',
+    # 'django.contrib.admin',       # Removed for pure API
     'django.contrib.auth',
     'django.contrib.contenttypes',
-    'django.contrib.sessions',
-    'django.contrib.messages',
+    'django.contrib.sessions',     # Keep for user model, but disable session functionality
+    # 'django.contrib.messages',    # Removed for pure API
     'django.contrib.staticfiles',
     'rest_framework',
-    'rest_framework.authtoken',  # Token authentication
+    'rest_framework.authtoken',
     'corsheaders',
     'playlist',
 ]
 
 MIDDLEWARE = [
-    'corsheaders.middleware.CorsMiddleware',  # CORS - must be at the top
+    'corsheaders.middleware.CorsMiddleware',
     'django.middleware.security.SecurityMiddleware',
-    'whitenoise.middleware.WhiteNoiseMiddleware',  # For static files on Render
+    'whitenoise.middleware.WhiteNoiseMiddleware',
     'django.contrib.sessions.middleware.SessionMiddleware',
     'django.middleware.common.CommonMiddleware',
     # 'django.middleware.csrf.CsrfViewMiddleware',  # REMOVED for pure API/mobile
     'django.contrib.auth.middleware.AuthenticationMiddleware',
-    'django.contrib.messages.middleware.MessageMiddleware',
+    # 'django.contrib.messages.middleware.MessageMiddleware',  # Removed for pure API
     'django.middleware.clickjacking.XFrameOptionsMiddleware',
 ]
 
@@ -115,8 +115,7 @@ CSRF_TRUSTED_ORIGINS = [
 # Django REST Framework Configuration
 REST_FRAMEWORK = {
     'DEFAULT_AUTHENTICATION_CLASSES': [
-        'rest_framework.authentication.TokenAuthentication',  # TOKEN ONLY
-        # Do NOT add SessionAuthentication!
+        'rest_framework.authentication.TokenAuthentication',
     ],
     'DEFAULT_PERMISSION_CLASSES': [
         'rest_framework.permissions.AllowAny',
@@ -125,22 +124,21 @@ REST_FRAMEWORK = {
     'PAGE_SIZE': 20,
 }
 
+# =============================
+# DISABLE SESSION FUNCTIONALITY FOR PURE API
+SESSION_ENGINE = 'django.contrib.sessions.backends.cache'  # Use minimal cache backend
+SESSION_CACHE_ALIAS = 'default'
+
+# Optional: Disable session cookie
+SESSION_COOKIE_HTTPONLY = False
+SESSION_COOKIE_SECURE = False
+SESSION_COOKIE_AGE = 1  # 1 second expiration
+SESSION_SAVE_EVERY_REQUEST = False
+# =============================
+
 ROOT_URLCONF = 'CineStack.urls'
 
-TEMPLATES = [
-    {
-        'BACKEND': 'django.template.backends.django.DjangoTemplates',
-        'DIRS': [],
-        'APP_DIRS': True,
-        'OPTIONS': {
-            'context_processors': [
-                'django.template.context_processors.request',
-                'django.contrib.auth.context_processors.auth',
-                'django.contrib.messages.context_processors.messages',
-            ],
-        },
-    },
-]
+TEMPLATES = []
 
 WSGI_APPLICATION = 'CineStack.wsgi.application'
 
