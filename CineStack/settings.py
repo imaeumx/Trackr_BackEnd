@@ -66,6 +66,7 @@ if not DEBUG:
     CORS_ALLOWED_ORIGINS = [
         'https://snack.expo.dev',
         'https://snack.expo.io',
+        'https://snack-web-player.s3.us-west-1.amazonaws.com',
         'http://localhost:19006',
         'http://192.168.100.207:19006',
         'exp://192.168.100.*:8081',
