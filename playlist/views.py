@@ -71,12 +71,13 @@ def simple_change_password_request(request):
             "Best regards,\nTrackR Team"
         )
         from_email = f"TrackR <{settings.DEFAULT_FROM_EMAIL}>"
-        response = Emails.send(
-            from_=from_email,
-            to=[user.email],
-            subject=subject,
-            text=message
-        )
+        # FIX: Use dictionary format
+        response = Emails.send({
+            "from": from_email,
+            "to": [user.email],
+            "subject": subject,
+            "text": message
+        })
         email_sent = response.get('id') is not None
     except Exception as e:
         email_sent = False
