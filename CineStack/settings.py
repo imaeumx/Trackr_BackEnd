@@ -22,17 +22,14 @@ BASE_DIR = Path(__file__).resolve().parent.parent
 # See https://docs.djangoproject.com/en/5.2/howto/deployment/checklist/
 
 # SECURITY WARNING: keep the secret key used in production secret!
-SECRET_KEY = os.environ.get('SECRET_KEY', 'FoDuozbhwXFlf7x-t0_3FB8zeNnrJOUUQuKWkNyWqwg9bjZJzp7Ltz5r5abk1enTUdo')
+SECRET_KEY = os.environ.get('SECRET_KEY')  # REQUIRED, no default
 
 # SECURITY WARNING: don't run with debug turned on in production!
-DEBUG = False  # Set to False for production
+DEBUG = os.environ.get('DEBUG', 'False').lower() in ('true', '1', 'yes')
 
-ALLOWED_HOSTS = [
-    'localhost',
-    '127.0.0.1',
-    '192.168.100.207',
-    'trackr-backend-3lxu.onrender.com',  # Render production domain
-]
+ALLOWED_HOSTS = os.environ.get('ALLOWED_HOSTS', 'localhost,127.0.0.1,192.168.100.207').split(',')
+if 'trackr-backend-3lxu.onrender.com' not in ALLOWED_HOSTS:
+    ALLOWED_HOSTS.append('trackr-backend-3lxu.onrender.com')
 
 
 # Application definition
@@ -62,9 +59,17 @@ MIDDLEWARE = [
     'django.middleware.clickjacking.XFrameOptionsMiddleware',
 ]
 
-# CORS Configuration - Allow React Native / Snack Expo to connect
-CORS_ALLOW_ALL_ORIGINS = True  # For development; restrict in production
+## CORS Configuration
+CORS_ALLOW_ALL_ORIGINS = DEBUG  # Only True in development
 CORS_ALLOW_CREDENTIALS = True
+if not DEBUG:
+    CORS_ALLOWED_ORIGINS = [
+        'https://snack.expo.dev',
+        'https://snack.expo.io',
+        'http://localhost:19006',
+        'http://192.168.100.207:19006',
+        'exp://192.168.100.*:8081',
+    ]
 
 # Django REST Framework Configuration
 REST_FRAMEWORK = {
@@ -156,11 +161,11 @@ DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'
 
 # Email Configuration for Password Reset
 EMAIL_BACKEND = 'django.core.mail.backends.smtp.EmailBackend'
-EMAIL_HOST = 'smtp.gmail.com'
-EMAIL_PORT = 587
-EMAIL_USE_TLS = True
-EMAIL_HOST_USER = "paghenson.student@ua.edu.ph"
-EMAIL_HOST_PASSWORD = "wcsg iogp teaf mwne"
+EMAIL_HOST = os.environ.get('EMAIL_HOST', 'smtp.gmail.com')
+EMAIL_PORT = int(os.environ.get('EMAIL_PORT', 587))
+EMAIL_USE_TLS = os.environ.get('EMAIL_USE_TLS', 'True').lower() in ('true', '1', 'yes')
+EMAIL_HOST_USER = os.environ.get('EMAIL_HOST_USER', '')
+EMAIL_HOST_PASSWORD = os.environ.get('EMAIL_HOST_PASSWORD', '')
 DEFAULT_FROM_EMAIL = EMAIL_HOST_USER
 
 # Password Reset Settings
@@ -179,7 +184,7 @@ if os.environ.get('DATABASE_URL'):
 
 # TMDB (The Movie DB) configuration - change these to point at a different TMDB-like API if needed
 # Set the API key in the environment or in settings.TMDB_API_KEY
-TMDB_API_KEY = os.environ.get("TMDB_API_KEY", "f185fd26e0b5d4a99193d29f47c04ce9")  # Replace with your TMDB API key
+TMDB_API_KEY = os.environ.get("TMDB_API_KEY", "")  # REQUIRED, no default
 TMDB_BASE_URL = os.environ.get("TMDB_BASE_URL", "https://api.themoviedb.org/3")
 # Base path used to build poster URLs (can be overridden)
 TMDB_IMAGE_BASE = os.environ.get("TMDB_IMAGE_BASE", "https://image.tmdb.org/t/p/w500")

@@ -858,7 +858,7 @@ class RequestChangePasswordCodeView(APIView):
     Request verification code for changing password (authenticated users).
     POST /api/auth/change-password/request/ - Send code to user's email
     """
-    permission_classes = [IsAuthenticated]
+    permission_classes = [AllowAny]
 
     def post(self, request):
         user = request.user
