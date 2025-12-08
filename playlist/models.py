@@ -4,6 +4,11 @@ from django.contrib.auth.models import User
 from django.utils import timezone
 
 
+# ...existing code...
+
+
+
+
 class Movie(models.Model):
     """Movie model - stores movie info (can be manually added or fetched from TMDB)."""
 
@@ -55,7 +60,7 @@ class Playlist(models.Model):
         help_text="True for automatic Watched/Watching/To Watch playlists"
     )
     movies = models.ManyToManyField(
-        Movie,
+        "Movie",
         through="PlaylistItem",
         related_name="playlists",
         blank=True
@@ -97,6 +102,7 @@ class PlaylistItem(models.Model):
         TO_WATCH = "to_watch", "To Watch"
         WATCHING = "watching", "Watching"
         WATCHED = "watched", "Watched"
+        DID_NOT_FINISH = "did_not_finish", "Did Not Finish"
 
     playlist = models.ForeignKey(
         Playlist,
@@ -104,7 +110,7 @@ class PlaylistItem(models.Model):
         related_name="items"
     )
     movie = models.ForeignKey(
-        Movie,
+        "Movie",
         on_delete=models.CASCADE,
         related_name="playlist_items"
     )
@@ -127,4 +133,81 @@ class PlaylistItem(models.Model):
 
     def __str__(self) -> str:
         return f"{self.movie.title} in {self.playlist.title} ({self.get_status_display()})"
+
+
+class Favorite(models.Model):
+    """User's favorite movies and TV shows."""
+    
+    user = models.ForeignKey(
+        User,
+        on_delete=models.CASCADE,
+        related_name='favorites'
+    )
+    movie = models.ForeignKey(
+        "Movie",
+        on_delete=models.CASCADE,
+        related_name='favorited_by'
+    )
+    added_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        unique_together = ("user", "movie")
+        ordering = ["-added_at"]
+
+    def __str__(self) -> str:
+        return f"{self.user.username} - {self.movie.title}"
+
+
+class Review(models.Model):
+    """User reviews and ratings for movies/shows."""
+    
+    user = models.ForeignKey(
+        User,
+        on_delete=models.CASCADE,
+        related_name='reviews'
+    )
+    movie = models.ForeignKey(
+        Movie,
+        on_delete=models.CASCADE,
+        related_name='reviews'
+    )
+    rating = models.PositiveSmallIntegerField(
+        help_text="Rating from 1-5 stars"
+    )
+    review_text = models.TextField(blank=True, default="")
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        unique_together = ("user", "movie")
+        ordering = ["-created_at"]
+
+    def __str__(self) -> str:
+        return f"{self.user.username} - {self.movie.title} ({self.rating}/5)"
+
+
+class EpisodeProgress(models.Model):
+    user = models.ForeignKey(User, on_delete=models.CASCADE, related_name='episode_progress')
+    series = models.ForeignKey('Movie', on_delete=models.CASCADE, related_name='episode_progress')
+    season = models.PositiveIntegerField()
+    episode = models.PositiveIntegerField()
+    status = models.CharField(
+        max_length=32,
+        choices=[
+            ('not_started', 'Not Started'),
+            ('in_progress', 'In Progress'),
+            ('completed', 'Completed'),
+        ],
+        default='not_started',
+    )
+    notes = models.TextField(blank=True, default='')
+    rating = models.PositiveSmallIntegerField(blank=True, null=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ['series', 'season', 'episode']
+        unique_together = ('user', 'series', 'season', 'episode')
+
+    def __str__(self):
+        return f"{self.user.username} - {self.series.title} S{self.season}E{self.episode}"
 

@@ -145,7 +145,10 @@ def get_or_create_movie_from_tmdb(tmdb_id: int, media_type: str = Movie.MediaTyp
     """Get or create a local Movie/TV show by TMDB id and media type."""
 
     normalized_type = media_type or Movie.MediaType.MOVIE
-    if normalized_type not in Movie.MediaType.values:
+    lowered = str(normalized_type).lower()
+    if lowered in ["tv", "series", "tv show", "tvshow"]:
+        normalized_type = Movie.MediaType.TV
+    elif normalized_type not in Movie.MediaType.values:
         normalized_type = Movie.MediaType.MOVIE
 
     try:

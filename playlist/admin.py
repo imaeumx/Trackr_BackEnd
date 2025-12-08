@@ -1,6 +1,6 @@
 from django.contrib import admin
 from django.contrib import messages
-from .models import Movie, Playlist, PlaylistItem
+from .models import Movie, Playlist, PlaylistItem, Favorite, Review
 
 
 @admin.register(Movie)
@@ -63,3 +63,21 @@ class PlaylistItemAdmin(admin.ModelAdmin):
     list_display = ("id", "playlist", "movie", "status", "added_at")
     list_filter = ("status", "playlist")
     autocomplete_fields = ("movie", "playlist")
+
+
+@admin.register(Favorite)
+class FavoriteAdmin(admin.ModelAdmin):
+    list_display = ("id", "user", "movie", "added_at")
+    list_filter = ("added_at",)
+    search_fields = ("user__username", "movie__title")
+    autocomplete_fields = ("movie",)
+    ordering = ("-added_at",)
+
+
+@admin.register(Review)
+class ReviewAdmin(admin.ModelAdmin):
+    list_display = ("id", "user", "movie", "rating", "created_at")
+    list_filter = ("rating", "created_at")
+    search_fields = ("user__username", "movie__title", "review_text")
+    autocomplete_fields = ("movie",)
+    ordering = ("-created_at",)

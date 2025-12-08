@@ -4,6 +4,9 @@ from .views import (
     MovieViewSet,
     PlaylistViewSet,
     PlaylistItemViewSet,
+    FavoriteViewSet,
+    ReviewViewSet,
+    EpisodeProgressViewSet,
     TMDBSearchView,
     TMDBMovieDetailView,
     TMDBTVDetailView,
@@ -23,6 +26,9 @@ router = DefaultRouter()
 router.register(r"movies", MovieViewSet, basename="movie")
 router.register(r"playlists", PlaylistViewSet, basename="playlist")
 router.register(r"playlist-items", PlaylistItemViewSet, basename="playlistitem")
+router.register(r"favorites", FavoriteViewSet, basename="favorite")
+router.register(r"reviews", ReviewViewSet, basename="review")
+router.register(r"episode-progress", EpisodeProgressViewSet, basename="episodeprogress")
 
 # The API URLs are now determined automatically by the router
 urlpatterns = [

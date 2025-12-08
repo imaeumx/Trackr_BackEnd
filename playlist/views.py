@@ -7,6 +7,7 @@ from rest_framework.authtoken.models import Token
 from django.shortcuts import get_object_or_404
 from django.contrib.auth.models import User
 from django.contrib.auth import authenticate
+from django.db.models import Q
 from django.core.mail import send_mail
 from django.conf import settings
 from django.utils import timezone
@@ -14,7 +15,7 @@ from django.core.cache import cache
 import random
 import string
 
-from .models import Movie, Playlist, PlaylistItem
+from .models import Movie, Playlist, PlaylistItem, Favorite, Review, EpisodeProgress
 from .serializers import (
     MovieSerializer,
     PlaylistSerializer,
@@ -23,6 +24,9 @@ from .serializers import (
     AddMovieToPlaylistSerializer,
     UpdatePlaylistItemStatusSerializer,
     UserRegistrationSerializer,
+    FavoriteSerializer,
+    ReviewSerializer,
+    EpisodeProgressSerializer,
 )
 from .services import (
     search_tmdb,
@@ -73,6 +77,10 @@ class RegisterView(APIView):
             {
                 'title': 'To Watch',
                 'description': 'Movies and series I want to watch'
+            },
+            {
+                'title': 'Did Not Finish',
+                'description': 'Movies and series I stopped watching'
             }
         ]
         
@@ -397,7 +405,29 @@ class PlaylistViewSet(viewsets.ModelViewSet):
 
         movie = get_object_or_404(Movie, pk=movie_id)
 
-        # Check if already in playlist
+        # If this is a status playlist, use move_to_status_playlist logic which handles all transitions
+        if playlist.is_status_playlist:
+            self.move_to_status_playlist(playlist.user, movie, status_value)
+            # Return the item from the target status playlist
+            target_status_name = {
+                'watched': 'Watched',
+                'watching': 'Watching',
+                'to_watch': 'To Watch',
+                'did_not_finish': 'Did Not Finish'
+            }.get(status_value, 'To Watch')
+            target_playlist = Playlist.objects.get(
+                user=playlist.user,
+                title=target_status_name,
+                is_status_playlist=True
+            )
+            item = PlaylistItem.objects.get(playlist=target_playlist, movie=movie)
+            return Response(
+                PlaylistItemSerializer(item).data,
+                status=status.HTTP_201_CREATED
+            )
+        
+        # For non-status playlists, use standard add logic
+        # Check if already in this specific playlist
         if PlaylistItem.objects.filter(playlist=playlist, movie=movie).exists():
             return Response(
                 {"error": "Movie already in playlist"},
@@ -410,9 +440,8 @@ class PlaylistViewSet(viewsets.ModelViewSet):
             status=status_value
         )
         
-        # Automatically organize into status playlists based on watch status
-        # This only affects the 3 system playlists, not user's custom playlists
-        self.move_to_status_playlist(playlist.user, movie, status_value)
+        # Update playlist's updated_at timestamp
+        playlist.save()
         
         return Response(
             PlaylistItemSerializer(item).data,
@@ -428,6 +457,9 @@ class PlaylistViewSet(viewsets.ModelViewSet):
             # Try to get the playlist item
             item = PlaylistItem.objects.get(playlist=playlist, movie_id=movie_id)
             item.delete()
+            
+            # Update playlist's updated_at timestamp
+            playlist.save()
             
             return Response(
                 {"message": f"Movie removed from playlist '{playlist.title}'"},
@@ -456,12 +488,19 @@ class PlaylistViewSet(viewsets.ModelViewSet):
 
         new_status = serializer.validated_data["status"]
         old_status = item.status
-        
-        item.status = new_status
-        item.save()
-        
-        # Auto-move to corresponding status playlist
-        if new_status:  # If status is set (not empty)
+
+        # Update status in all PlaylistItems for this user and movie
+        PlaylistItem.objects.filter(
+            movie_id=movie_id,
+            playlist__user=playlist.user
+        ).update(status=new_status)
+
+        # Refresh item from DB
+        item.refresh_from_db()
+
+        # Auto-move to corresponding status playlist ONLY if this is a status playlist
+        # Don't move movies when updating status in custom playlists
+        if playlist.is_status_playlist and new_status:
             self.move_to_status_playlist(playlist.user, item.movie, new_status)
 
         return Response(PlaylistItemSerializer(item).data)
@@ -471,7 +510,8 @@ class PlaylistViewSet(viewsets.ModelViewSet):
         status_playlist_map = {
             'watched': 'Watched',
             'watching': 'Watching',
-            'to_watch': 'To Watch'
+            'to_watch': 'To Watch',
+            'did_not_finish': 'Did Not Finish'
         }
         
         if status not in status_playlist_map:
@@ -494,15 +534,12 @@ class PlaylistViewSet(viewsets.ModelViewSet):
             target_playlist.is_status_playlist = True
             target_playlist.save()
         
-        # Remove from all other status playlists
-        status_playlists = Playlist.objects.filter(
-            user=user,
-            title__in=['Watched', 'Watching', 'To Watch']
-        ).exclude(id=target_playlist.id)
-        
-        for pl in status_playlists:
-            PlaylistItem.objects.filter(playlist=pl, movie=movie).delete()
-        
+        # Update status in all PlaylistItems (status and custom) for this user and movie
+        PlaylistItem.objects.filter(
+            movie=movie,
+            playlist__user=user
+        ).update(status=status)
+
         # Add to target status playlist (if not already there)
         item, created = PlaylistItem.objects.get_or_create(
             playlist=target_playlist,
@@ -518,7 +555,12 @@ class PlaylistViewSet(viewsets.ModelViewSet):
     def update_item_rating(self, request, pk=None, movie_id=None):
         """Update a movie's user rating in this playlist."""
         playlist = self.get_object()
-        item = get_object_or_404(PlaylistItem, playlist=playlist, movie_id=movie_id)
+        movie = get_object_or_404(Movie, pk=movie_id)
+        item, created = PlaylistItem.objects.get_or_create(
+            playlist=playlist,
+            movie=movie,
+            defaults={"status": PlaylistItem.Status.TO_WATCH}
+        )
 
         rating = request.data.get('rating')
         if rating is None:
@@ -560,6 +602,54 @@ class PlaylistItemViewSet(viewsets.ModelViewSet):
     serializer_class = PlaylistItemSerializer
 
 
+class EpisodeProgressViewSet(viewsets.ModelViewSet):
+    """API endpoint for per-user episode progress.
+
+    This viewset ensures users only see and modify their own episode progress records.
+    """
+    serializer_class = EpisodeProgressSerializer
+    permission_classes = [IsAuthenticated]
+
+    def get_queryset(self):
+        # Only return progress records for the requesting user
+        qs = EpisodeProgress.objects.filter(user=self.request.user).select_related('series')
+
+        # Optional filtering by series/season/episode via query params
+        series_id = self.request.query_params.get('series')
+        season = self.request.query_params.get('season')
+        episode = self.request.query_params.get('episode')
+
+        if series_id:
+            try:
+                qs = qs.filter(series_id=int(series_id))
+            except (ValueError, TypeError):
+                pass
+        if season:
+            try:
+                qs = qs.filter(season=int(season))
+            except (ValueError, TypeError):
+                pass
+        if episode:
+            try:
+                qs = qs.filter(episode=int(episode))
+            except (ValueError, TypeError):
+                pass
+
+        return qs
+
+    def perform_create(self, serializer):
+        # Debug: log incoming data
+        print('EpisodeProgressViewSet.perform_create:', serializer.validated_data)
+        # Assign the current user on create
+        serializer.save(user=self.request.user)
+
+    def perform_update(self, serializer):
+        # Debug: log incoming data
+        print('EpisodeProgressViewSet.perform_update:', serializer.validated_data)
+        # Prevent changing ownership — always ensure user is request.user
+        serializer.save(user=self.request.user)
+
+
 @api_view(['GET'])
 def get_playlist_items(request, playlist_id):
     """Get all items in a playlist."""
@@ -577,25 +667,39 @@ def generate_verification_code():
 class RequestPasswordResetView(APIView):
     """
     Request password reset code.
+    Accepts email or username and sends the code to the user's email.
     POST /api/auth/password-reset/request/ - Send verification code to email
     """
     permission_classes = [AllowAny]
 
     def post(self, request):
-        email = request.data.get('email', '').strip()
-        
-        if not email:
+        # Accept either email or username as the identifier
+        identifier = (
+            request.data.get('email', '')
+            or request.data.get('username', '')
+            or request.data.get('login', '')
+        ).strip()
+
+        if not identifier:
             return Response(
-                {'error': 'Email is required'},
+                {'error': 'Email or username is required'},
                 status=status.HTTP_400_BAD_REQUEST
             )
-        
-        try:
-            user = User.objects.get(email__iexact=email)
-        except User.DoesNotExist:
+
+        user = User.objects.filter(
+            Q(email__iexact=identifier) | Q(username__iexact=identifier)
+        ).first()
+
+        if not user:
             return Response(
-                {'error': 'No account found with this email address'},
+                {'error': 'No account found with this email or username'},
                 status=status.HTTP_404_NOT_FOUND
+            )
+
+        if not user.email:
+            return Response(
+                {'error': 'No email address is associated with this account'},
+                status=status.HTTP_400_BAD_REQUEST
             )
         
         # Generate verification code
@@ -630,7 +734,7 @@ This code will expire in 10 minutes.
 If you didn't request this, please ignore this email.
 
 Best regards,
-TrackR Team
+TrackR Trio
             """
             send_mail(
                 subject,
@@ -888,3 +992,302 @@ class ChangePasswordView(APIView):
             'access': new_token.key
         }, status=status.HTTP_200_OK)
 
+
+class FavoriteViewSet(viewsets.ModelViewSet):
+    """
+    ViewSet for managing user favorites.
+    GET /api/favorites/ - List all user favorites
+    POST /api/favorites/ - Add to favorites (requires tmdb_id and media_type)
+    DELETE /api/favorites/{id}/ - Remove from favorites by favorite ID
+    """
+    serializer_class = FavoriteSerializer
+    permission_classes = [IsAuthenticated]
+
+    def get_queryset(self):
+        return Favorite.objects.filter(user=self.request.user).select_related('movie')
+
+    def create(self, request, *args, **kwargs):
+        """Add a movie/series to favorites."""
+        tmdb_id = request.data.get('tmdb_id')
+        media_type = request.data.get('media_type', 'movie')
+
+        if not tmdb_id:
+            return Response(
+                {'error': 'tmdb_id is required'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        try:
+            # Get or create the movie from TMDB
+            movie, created = get_or_create_movie_from_tmdb(tmdb_id, media_type)
+            
+            # Check if already favorited
+            existing_favorite = Favorite.objects.filter(
+                user=request.user,
+                movie=movie
+            ).first()
+
+            if existing_favorite:
+                serializer = self.get_serializer(existing_favorite)
+                return Response(
+                    {
+                        'message': 'Already in favorites',
+                        'favorite': serializer.data
+                    },
+                    status=status.HTTP_200_OK
+                )
+
+            # Create favorite
+            favorite = Favorite.objects.create(
+                user=request.user,
+                movie=movie
+            )
+
+            serializer = self.get_serializer(favorite)
+            return Response(serializer.data, status=status.HTTP_201_CREATED)
+
+        except TMDBError as e:
+            return Response(
+                {'error': f'TMDB Error: {str(e)}'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+        except Exception as e:
+            import traceback
+            print(f"[FavoriteViewSet] Error creating favorite: {str(e)}")
+            print(traceback.format_exc())
+            return Response(
+                {'error': str(e)},
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR
+            )
+
+    @action(detail=False, methods=['delete'], url_path='remove_by_tmdb')
+    def remove_by_tmdb(self, request):
+        """Remove from favorites by TMDB ID."""
+        tmdb_id = request.data.get('tmdb_id')
+
+        if not tmdb_id:
+            return Response(
+                {'error': 'tmdb_id is required'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        try:
+            # Find movie by TMDB ID
+            movie = Movie.objects.filter(tmdb_id=tmdb_id).first()
+            if not movie:
+                return Response(
+                    {'error': 'Movie not found'},
+                    status=status.HTTP_404_NOT_FOUND
+                )
+
+            # Delete the favorite
+            deleted_count, _ = Favorite.objects.filter(
+                user=request.user,
+                movie=movie
+            ).delete()
+
+            if deleted_count == 0:
+                return Response(
+                    {'error': 'Favorite not found'},
+                    status=status.HTTP_404_NOT_FOUND
+                )
+
+            return Response(
+                {'message': 'Removed from favorites'},
+                status=status.HTTP_200_OK
+            )
+
+        except Exception as e:
+            return Response(
+                {'error': str(e)},
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR
+            )
+
+    @action(detail=False, methods=['get'], url_path='check')
+    def check_favorite(self, request):
+        """Check if a movie/series is favorited."""
+        tmdb_id = request.query_params.get('tmdb_id')
+
+        if not tmdb_id:
+            return Response(
+                {'is_favorite': False},
+                status=status.HTTP_200_OK
+            )
+
+        try:
+            movie = Movie.objects.filter(tmdb_id=tmdb_id).first()
+            if not movie:
+                return Response(
+                    {'is_favorite': False},
+                    status=status.HTTP_200_OK
+                )
+
+            is_favorite = Favorite.objects.filter(
+                user=request.user,
+                movie=movie
+            ).exists()
+
+            return Response(
+                {'is_favorite': is_favorite},
+                status=status.HTTP_200_OK
+            )
+
+        except Exception as e:
+            return Response(
+                {'is_favorite': False, 'error': str(e)},
+                status=status.HTTP_200_OK
+            )
+
+
+class ReviewViewSet(viewsets.ModelViewSet):
+    """
+    ViewSet for managing user reviews.
+    GET /api/reviews/ - List all user reviews
+    POST /api/reviews/ - Add/Update review (requires tmdb_id, rating, optional review_text)
+    DELETE /api/reviews/{id}/ - Delete review by review ID
+    """
+    serializer_class = ReviewSerializer
+    permission_classes = [IsAuthenticated]
+
+    def get_queryset(self):
+        return Review.objects.filter(user=self.request.user).select_related('movie', 'user')
+
+    def create(self, request, *args, **kwargs):
+        """Add or update a review."""
+        tmdb_id = request.data.get('tmdb_id')
+        rating = request.data.get('rating')
+        review_text = request.data.get('review_text', '')
+        media_type = request.data.get('media_type', 'movie')
+
+        if not tmdb_id:
+            return Response(
+                {'error': 'tmdb_id is required'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        if not rating or not (1 <= int(rating) <= 5):
+            return Response(
+                {'error': 'rating must be between 1 and 5'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        try:
+            # Get or create the movie from TMDB
+            movie, _ = get_or_create_movie_from_tmdb(tmdb_id, media_type)
+            
+            # Create or update review
+            review, created = Review.objects.update_or_create(
+                user=request.user,
+                movie=movie,
+                defaults={
+                    'rating': rating,
+                    'review_text': review_text
+                }
+            )
+
+            serializer = self.get_serializer(review)
+            return Response(serializer.data, status=status.HTTP_201_CREATED if created else status.HTTP_200_OK)
+
+        except TMDBError as e:
+            return Response(
+                {'error': f'TMDB Error: {str(e)}'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+        except Exception as e:
+            return Response(
+                {'error': str(e)},
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR
+            )
+
+    @action(detail=False, methods=['get'], url_path='by_movie')
+    def get_review_by_movie(self, request):
+        """Get user's review for a specific movie by TMDB ID."""
+        tmdb_id = request.query_params.get('tmdb_id')
+
+        if not tmdb_id:
+            return Response(
+                {'error': 'tmdb_id is required'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        try:
+            movie = Movie.objects.filter(tmdb_id=tmdb_id).first()
+            if not movie:
+                return Response(None, status=status.HTTP_200_OK)
+
+            review = Review.objects.filter(
+                user=request.user,
+                movie=movie
+            ).first()
+
+            if not review:
+                return Response(None, status=status.HTTP_200_OK)
+
+            serializer = self.get_serializer(review)
+            return Response(serializer.data, status=status.HTTP_200_OK)
+
+        except Exception as e:
+            return Response(
+                {'error': str(e)},
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR
+            )
+
+    @action(detail=False, methods=['get'], url_path='my_reviews')
+    def my_reviews(self, request):
+        """Get all reviews by current user."""
+        try:
+            reviews = self.get_queryset()
+            serializer = self.get_serializer(reviews, many=True)
+            return Response(serializer.data, status=status.HTTP_200_OK)
+        except Exception as e:
+            return Response(
+                {'error': str(e)},
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR
+            )
+
+    @action(detail=False, methods=['delete'], url_path='delete_by_movie')
+    def delete_by_movie(self, request):
+        """Delete user's review for a specific movie by TMDB ID or movie ID."""
+        tmdb_id = request.data.get('tmdb_id')
+        movie_id = request.data.get('movie_id')
+
+        if not tmdb_id and not movie_id:
+            return Response(
+                {'error': 'tmdb_id or movie_id is required'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        try:
+            if tmdb_id:
+                movie = Movie.objects.filter(tmdb_id=tmdb_id).first()
+            else:
+                movie = Movie.objects.filter(id=movie_id).first()
+
+            if not movie:
+                return Response(
+                    {'error': 'Movie not found'},
+                    status=status.HTTP_404_NOT_FOUND
+                )
+
+            review = Review.objects.filter(
+                user=request.user,
+                movie=movie
+            ).first()
+
+            if not review:
+                return Response(
+                    {'error': 'Review not found'},
+                    status=status.HTTP_404_NOT_FOUND
+                )
+
+            review.delete()
+            return Response(
+                {'message': 'Review deleted successfully'},
+                status=status.HTTP_200_OK
+            )
+
+        except Exception as e:
+            return Response(
+                {'error': str(e)},
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR
+            )

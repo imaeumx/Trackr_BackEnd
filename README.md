@@ -1,10 +1,10 @@
-# CineStack - Movie Playlist Mobile App 🎬
+# TrackR - Watchlist Mobile App 🎬
 
 A CRUD mobile application for managing movie watchlists, built with Django REST Framework backend and React Native (Expo) frontend.
 
 ## 📱 Project Overview
 
-**CineStack** is a personal movie tracking app where users can:
+**TrackR** is a personal movie tracking app where users can:
 - **Create** playlists (e.g., "Weekend Horror", "Must Watch Classics")
 - **Read** their playlists and view movies inside them
 - **Update** playlist names or movie watch status (To Watch → Watched)
@@ -63,7 +63,7 @@ CineStack/
 
 ### 1. Clone and Setup
 ```bash
-git clone https://github.com/YOUR_USERNAME/CineStack.git
+git clone https://github.com/imaeumx/Trackr_BackEnd
 cd CineStack
 ```
 
@@ -119,10 +119,10 @@ python manage.py test playlist
 
 | Member | Role | Responsibilities |
 |--------|------|------------------|
-| **Member A** | Backend Lead | Django setup, API development, Database, Render deployment |
-| **Member B** | Frontend Lead | React Native screens, Navigation, UI/UX styling |
-| **Member C** | Integration & Docs | Axios API calls, Testing on Snack Expo, Documentation |
+| **Patricia Alizah Henson** | Integration & Docs / Team Leader | Documentation, Wireframe Design, Frontend Screens, Backend, Axios API Calls, Testing |
+| **Amaro Juno Alonzo** | Backend Lead | Django Setup, API Development, Database (Modeling/CRUD), Backend Services. |
+| **Justin Vince Sunga** | Frontend Lead | React Native Screens, Backend, Navigation, UI/UX Styling, Deployment |
 
 ## 📝 License
 
-This project is for educational purposes (PEITEL Final Project).
+This project is for educational purposes (C-PEITEL1 Final Project).

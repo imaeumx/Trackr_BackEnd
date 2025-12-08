@@ -1,7 +1,8 @@
 from rest_framework import serializers
 from django.contrib.auth.models import User
 from rest_framework.authtoken.models import Token
-from .models import Movie, Playlist, PlaylistItem
+from .models import Movie, Playlist, PlaylistItem, Favorite, Review
+from .models import EpisodeProgress
 
 class UserRegistrationSerializer(serializers.Serializer):
     """Serializer for user registration."""
@@ -134,3 +135,53 @@ class UpdatePlaylistItemStatusSerializer(serializers.Serializer):
     """Serializer for updating a playlist item's status."""
 
     status = serializers.ChoiceField(choices=PlaylistItem.Status.choices)
+
+
+class FavoriteSerializer(serializers.ModelSerializer):
+    """Serializer for Favorite model with nested movie details."""
+    
+    movie = MovieSerializer(read_only=True)
+    tmdb_id = serializers.IntegerField(write_only=True, required=False)
+    media_type = serializers.ChoiceField(
+        choices=Movie.MediaType.choices,
+        write_only=True,
+        required=False,
+        default=Movie.MediaType.MOVIE
+    )
+
+    class Meta:
+        model = Favorite
+        fields = ["id", "movie", "tmdb_id", "media_type", "added_at"]
+        read_only_fields = ["id", "movie", "added_at"]
+
+
+class ReviewSerializer(serializers.ModelSerializer):
+    """Serializer for Review model with nested movie and user details."""
+    
+    movie = MovieSerializer(read_only=True)
+    username = serializers.CharField(source='user.username', read_only=True)
+    tmdb_id = serializers.IntegerField(write_only=True, required=False)
+    media_type = serializers.ChoiceField(
+        choices=Movie.MediaType.choices,
+        write_only=True,
+        required=False,
+        default=Movie.MediaType.MOVIE
+    )
+
+    class Meta:
+        model = Review
+        fields = ["id", "movie", "user", "username", "rating", "review_text", "tmdb_id", "media_type", "created_at", "updated_at"]
+        read_only_fields = ["id", "movie", "user", "username", "created_at", "updated_at"]
+
+
+
+class EpisodeProgressSerializer(serializers.ModelSerializer):
+    user = serializers.PrimaryKeyRelatedField(read_only=True)
+    series = serializers.PrimaryKeyRelatedField(queryset=Movie.objects.all())
+
+    class Meta:
+        model = EpisodeProgress
+        fields = [
+            'id', 'user', 'series', 'season', 'episode', 'status', 'notes', 'rating', 'updated_at'
+        ]
+        read_only_fields = ['id', 'user', 'updated_at']
