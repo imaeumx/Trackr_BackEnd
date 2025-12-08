@@ -16,7 +16,7 @@ from .views import (
     TMDBTopRatedView,
     get_playlist_items,
     RequestPasswordResetView,
-    VerifyResetCodeView,
+    VerifyResetCodeView,  # ADD THIS IMPORT!
     ResetPasswordView,
     LoginView,
     RegisterView
@@ -34,9 +34,6 @@ router.register(r"episode-progress", EpisodeProgressViewSet, basename="episodepr
 
 # The API URLs are now determined automatically by the router
 urlpatterns = [
-    # Simple CSRF-free endpoints
-    # path('simple-login/', simple_login, name='simple-login'),
-    # path('simple-register/', simple_register, name='simple-register'),
     path("", include(router.urls)),
     # Playlist items endpoint
     path("playlists/<int:playlist_id>/items/", get_playlist_items, name="playlist-items"),
@@ -53,12 +50,12 @@ urlpatterns = [
     path("tmdb/top-rated/", TMDBTopRatedView.as_view(), name="tmdb-top-rated"),
     # Password reset endpoints
     path("auth/password-reset/request/", RequestPasswordResetView.as_view(), name="password-reset-request"),
-    path("auth/password-reset/verify/", VerifyResetCodeView.as_view(), name="password-reset-verify"),
+    path("auth/password-reset/verify/", VerifyResetCodeView.as_view(), name="password-reset-verify"),  # ADD THIS LINE!
     path("auth/password-reset/confirm/", ResetPasswordView.as_view(), name="password-reset-confirm"),
     # USE SIMPLE CHANGE PASSWORD ENDPOINTS ONLY
     path("auth/change-password/request/", simple_change_password_request, name="change-password-request"),
     path("auth/change-password/", simple_change_password, name="change-password"),
-    # Only use custom login/register endpoints (no DRF session auth)
+    # Auth endpoints
     path('auth/login/', LoginView.as_view(), name='login'),
     path('auth/register/', RegisterView.as_view(), name='register'),
 ]

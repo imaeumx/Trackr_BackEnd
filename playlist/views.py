@@ -1,109 +1,20 @@
 import random
 import string
 from django.views.decorators.csrf import csrf_exempt
-from rest_framework.decorators import api_view, permission_classes
-from rest_framework.permissions import IsAuthenticated
+from rest_framework.decorators import api_view, permission_classes, action
+from rest_framework.permissions import IsAuthenticated, AllowAny
 from rest_framework.response import Response
-from rest_framework import status
+from rest_framework import status, viewsets
 from django.core.cache import cache
 from django.contrib.auth import get_user_model
 from rest_framework.authtoken.models import Token
-
-User = get_user_model()
-from django.views.decorators.csrf import csrf_exempt
-
-# SIMPLE CHANGE PASSWORD ENDPOINTS (temporary for deployment)
-from rest_framework.decorators import api_view, permission_classes
-
-@api_view(['POST'])
-@permission_classes([IsAuthenticated])
-@csrf_exempt
-def simple_change_password_request(request):
-    """Simple change password request - returns code in response"""
-    user = request.user
-    if not user.email:
-        return Response(
-            {'error': 'No email address associated with your account'},
-            status=status.HTTP_400_BAD_REQUEST
-        )
-    # Generate code
-    code = ''.join(random.choices(string.digits, k=6))
-    cache_key = f'change_password_{user.id}'
-    cache.set(cache_key, code, 600)  # 10 minutes
-    # For development: return code in response
-    return Response({
-        'message': 'Change password code generated',
-        'email': user.email,
-        'code': code,  # Return code in response for development
-        'user_id': user.id
-    })
-
-@api_view(['POST'])
-@permission_classes([IsAuthenticated])
-@csrf_exempt
-def simple_change_password(request):
-    """Simple change password with code"""
-    user = request.user
-    code = request.data.get('code', '').strip()
-    current_password = request.data.get('current_password')
-    new_password = request.data.get('new_password')
-    if not code or not current_password or not new_password:
-        return Response(
-            {'error': 'Code, current password, and new password are required'},
-            status=status.HTTP_400_BAD_REQUEST
-        )
-    # Verify current password
-    if not user.check_password(current_password):
-        return Response(
-            {'error': 'Current password is incorrect'},
-            status=status.HTTP_400_BAD_REQUEST
-        )
-    # Verify code
-    cache_key = f'change_password_{user.id}'
-    stored_code = cache.get(cache_key)
-    if not stored_code:
-        return Response(
-            {'error': 'Code expired or invalid. Please request a new one'},
-            status=status.HTTP_400_BAD_REQUEST
-        )
-    if stored_code != code:
-        return Response(
-            {'error': 'Invalid verification code'},
-            status=status.HTTP_400_BAD_REQUEST
-        )
-    if len(new_password) < 8:
-        return Response(
-            {'error': 'New password must be at least 8 characters long'},
-            status=status.HTTP_400_BAD_REQUEST
-        )
-    # Change password
-    user.set_password(new_password)
-    user.save()
-    # Clear cache
-    cache.delete(cache_key)
-    # Regenerate token
-    Token.objects.filter(user=user).delete()
-    new_token = Token.objects.create(user=user)
-    return Response({
-        'message': 'Password changed successfully',
-        'access': new_token.key
-    })
-from rest_framework import viewsets, status, generics
-from rest_framework.decorators import action, api_view
-from rest_framework.response import Response
-from rest_framework.permissions import AllowAny, IsAuthenticated
 from rest_framework.views import APIView
-from rest_framework.authtoken.models import Token
 from django.shortcuts import get_object_or_404
-from django.contrib.auth.models import User
 from django.contrib.auth import authenticate
 from django.db.models import Q
 from django.core.mail import send_mail
 from django.conf import settings
 from django.utils import timezone
-from django.core.cache import cache
-import random
-import string
 
 from .models import Movie, Playlist, PlaylistItem, Favorite, Review, EpisodeProgress
 from .serializers import (
@@ -128,18 +39,135 @@ from .services import (
     get_tmdb_top_rated,
 )
 
+User = get_user_model()
+
+# ============ SIMPLE CHANGE PASSWORD ENDPOINTS ============
+
+@api_view(['POST'])
+@permission_classes([IsAuthenticated])
+@csrf_exempt
+def simple_change_password_request(request):
+    """Simple change password request - returns code in response"""
+    user = request.user
+    if not user.email:
+        return Response(
+            {'error': 'No email address associated with your account'},
+            status=status.HTTP_400_BAD_REQUEST
+        )
+    code = ''.join(random.choices(string.digits, k=6))
+    cache_key = f'change_password_{user.id}'
+    cache.set(cache_key, code, 600)  # 10 minutes
+    
+    # Try to send email
+    try:
+        subject = 'TrackR - Change Password Verification Code'
+        message = (
+            f"Hello {user.username},\n\n"
+            "You requested to change your password for your TrackR account.\n\n"
+            f"Your verification code is: {code}\n\n"
+            "This code will expire in 10 minutes.\n\n"
+            "If you didn't request this, please secure your account immediately.\n\n"
+            "Best regards,\nTrackR Team"
+        )
+        send_mail(
+            subject,
+            message,
+            settings.DEFAULT_FROM_EMAIL,
+            [user.email],
+            fail_silently=False,
+        )
+        email_sent = True
+    except Exception as e:
+        email_sent = False
+        import traceback
+        print(f"Email sending error: {str(e)}")
+        print(traceback.format_exc())
+    
+    return Response({
+        'message': 'Change password code generated',
+        'email': user.email,
+        'code': code,  # Return code for development
+        'email_sent': email_sent,
+        'user_id': user.id
+    })
+
+@api_view(['POST'])
+@permission_classes([IsAuthenticated])
+@csrf_exempt
+def simple_change_password(request):
+    """Simple change password with code"""
+    user = request.user
+    code = request.data.get('code', '').strip()
+    current_password = request.data.get('current_password')
+    new_password = request.data.get('new_password')
+    
+    if not code or not current_password or not new_password:
+        return Response(
+            {'error': 'Code, current password, and new password are required'},
+            status=status.HTTP_400_BAD_REQUEST
+        )
+    
+    # Verify current password
+    if not user.check_password(current_password):
+        return Response(
+            {'error': 'Current password is incorrect'},
+            status=status.HTTP_400_BAD_REQUEST
+        )
+    
+    # Verify code
+    cache_key = f'change_password_{user.id}'
+    stored_code = cache.get(cache_key)
+    
+    if not stored_code:
+        return Response(
+            {'error': 'Code expired or invalid. Please request a new one'},
+            status=status.HTTP_400_BAD_REQUEST
+        )
+    
+    if stored_code != code:
+        return Response(
+            {'error': 'Invalid verification code'},
+            status=status.HTTP_400_BAD_REQUEST
+        )
+    
+    if len(new_password) < 8:
+        return Response(
+            {'error': 'New password must be at least 8 characters long'},
+            status=status.HTTP_400_BAD_REQUEST
+        )
+    
+    # Change password
+    user.set_password(new_password)
+    user.save()
+    
+    # Clear cache
+    cache.delete(cache_key)
+    
+    # Regenerate token
+    Token.objects.filter(user=user).delete()
+    new_token = Token.objects.create(user=user)
+    
+    return Response({
+        'message': 'Password changed successfully',
+        'access': new_token.key
+    }, status=status.HTTP_200_OK)
+
+# ============ HELPER FUNCTIONS ============
+
+def generate_verification_code():
+    """Generate a 6-digit verification code."""
+    return ''.join(random.choices(string.digits, k=6))
+
+# ============ AUTH VIEWS ============
+
 class RegisterView(APIView):
-    """
-    User registration endpoint.
-    POST /api/auth/register/ - Register a new user and return token
-    """
+    """User registration endpoint."""
     permission_classes = [AllowAny]
 
     def post(self, request):
         serializer = UserRegistrationSerializer(data=request.data)
         if serializer.is_valid():
             user = serializer.save()
-            # Create token for the new user
             token, _ = Token.objects.get_or_create(user=user)
             
             # Create automatic status playlists for new user
@@ -156,22 +184,10 @@ class RegisterView(APIView):
     def create_status_playlists(self, user):
         """Create automatic status playlists for user"""
         status_playlists = [
-            {
-                'title': 'Watched',
-                'description': 'Movies and series I have watched'
-            },
-            {
-                'title': 'Watching',
-                'description': 'Movies and series I am currently watching'
-            },
-            {
-                'title': 'To Watch',
-                'description': 'Movies and series I want to watch'
-            },
-            {
-                'title': 'Did Not Finish',
-                'description': 'Movies and series I stopped watching'
-            }
+            {'title': 'Watched', 'description': 'Movies and series I have watched'},
+            {'title': 'Watching', 'description': 'Movies and series I am currently watching'},
+            {'title': 'To Watch', 'description': 'Movies and series I want to watch'},
+            {'title': 'Did Not Finish', 'description': 'Movies and series I stopped watching'}
         ]
         
         for pl_data in status_playlists:
@@ -184,12 +200,8 @@ class RegisterView(APIView):
                 }
             )
 
-
 class LoginView(APIView):
-    """
-    User login endpoint.
-    POST /api/auth/login/ - Login and get token
-    """
+    """User login endpoint."""
     permission_classes = [AllowAny]
 
     def post(self, request):
@@ -202,44 +214,189 @@ class LoginView(APIView):
                 status=status.HTTP_400_BAD_REQUEST
             )
 
-        # Try case-insensitive username lookup
         try:
             user = User.objects.get(username__iexact=username)
-            # Authenticate with the actual username from database
             authenticated_user = authenticate(username=user.username, password=password)
             
             if authenticated_user:
-                # Get or create token for the user
                 token, created = Token.objects.get_or_create(user=authenticated_user)
                 
-                # Return response in the format your frontend expects
                 return Response({
                     'access': token.key,
-                    'refresh': '',  # Add if you implement refresh tokens
+                    'refresh': '',
                     'user_id': authenticated_user.id,
                     'username': authenticated_user.username,
                     'email': authenticated_user.email,
                     'message': 'Login successful'
                 }, status=status.HTTP_200_OK)
             else:
-                # User exists but password is wrong
                 return Response(
                     {'error': 'Invalid password'},
                     status=status.HTTP_401_UNAUTHORIZED
                 )
         except User.DoesNotExist:
-            # User doesn't exist
             return Response(
                 {'error': 'User does not exist'},
                 status=status.HTTP_404_NOT_FOUND
             )
 
+# ============ PASSWORD RESET VIEWS ============
+
+class RequestPasswordResetView(APIView):
+    """Request password reset code."""
+    permission_classes = [AllowAny]
+
+    def post(self, request):
+        identifier = (
+            request.data.get('email', '')
+            or request.data.get('username', '')
+            or request.data.get('login', '')
+        ).strip()
+        
+        if not identifier:
+            return Response(
+                {'error': 'Email or username is required'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        user = User.objects.filter(
+            Q(email__iexact=identifier) | Q(username__iexact=identifier)
+        ).first()
+
+        if not user:
+            return Response(
+                {'error': 'No account found with this email or username'},
+                status=status.HTTP_404_NOT_FOUND
+            )
+        
+        if not user.email:
+            return Response(
+                {'error': 'No email address is associated with this account'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+        
+        code = generate_verification_code()
+        cache_key = f'password_reset_{user.id}'
+        cache.set(cache_key, code, settings.PASSWORD_RESET_TIMEOUT)
+        
+        try:
+            subject = 'TrackR - Password Reset Code'
+            message = (
+                f"Hello {user.username},\n\n"
+                "You requested to reset your password for your TrackR account.\n\n"
+                f"Your verification code is: {code}\n\n"
+                "This code will expire in 10 minutes.\n\n"
+                "If you didn't request this, please ignore this email.\n\n"
+                "Best regards,\nTrackR Trio"
+            )
+            send_mail(
+                subject,
+                message,
+                settings.DEFAULT_FROM_EMAIL,
+                [user.email],
+                fail_silently=False,
+            )
+            return Response({
+                'message': 'Verification code sent to your email',
+                'user_id': user.id
+            }, status=status.HTTP_200_OK)
+        except Exception as e:
+            import traceback
+            print(f"Email sending error: {str(e)}")
+            print(traceback.format_exc())
+            return Response(
+                {'error': f'Failed to send email. Error: {str(e)}'},
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR
+            )
+
+class VerifyResetCodeView(APIView):
+    """Verify password reset code."""
+    permission_classes = [AllowAny]
+
+    def post(self, request):
+        user_id = request.data.get('user_id')
+        code = request.data.get('code', '').strip()
+        
+        if not user_id or not code:
+            return Response(
+                {'error': 'User ID and code are required'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+        
+        cache_key = f'password_reset_{user_id}'
+        stored_code = cache.get(cache_key)
+        
+        if not stored_code:
+            return Response(
+                {'error': 'Code expired or invalid. Please request a new one'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+        
+        if stored_code != code:
+            return Response(
+                {'error': 'Invalid verification code'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+        
+        # Mark code as verified
+        verified_key = f'password_reset_verified_{user_id}'
+        cache.set(verified_key, True, 600)
+        
+        return Response({
+            'message': 'Code verified successfully'
+        }, status=status.HTTP_200_OK)
+
+class ResetPasswordView(APIView):
+    """Reset password after verification."""
+    permission_classes = [AllowAny]
+
+    def post(self, request):
+        user_id = request.data.get('user_id')
+        new_password = request.data.get('new_password')
+        
+        if not user_id or not new_password:
+            return Response(
+                {'error': 'User ID and new password are required'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+        
+        if len(new_password) < 8:
+            return Response(
+                {'error': 'Password must be at least 8 characters long'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+        
+        # Check if code was verified
+        verified_key = f'password_reset_verified_{user_id}'
+        if not cache.get(verified_key):
+            return Response(
+                {'error': 'Please verify your code first'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+        
+        try:
+            user = User.objects.get(id=user_id)
+            user.set_password(new_password)
+            user.save()
+            
+            # Clear cache keys
+            cache.delete(f'password_reset_{user_id}')
+            cache.delete(verified_key)
+            
+            return Response({
+                'message': 'Password reset successfully'
+            }, status=status.HTTP_200_OK)
+            
+        except User.DoesNotExist:
+            return Response(
+                {'error': 'User not found'},
+                status=status.HTTP_404_NOT_FOUND
+            )
+
+# ============ TMDB VIEWS ============
 
 class TMDBSearchView(APIView):
-    """
-    Proxy endpoint for TMDB search.
-    GET /api/tmdb/search/?query=<movie_name>&page=1
-    """
+    """Proxy endpoint for TMDB search."""
     permission_classes = [AllowAny]
 
     def get(self, request):
@@ -267,12 +424,8 @@ class TMDBSearchView(APIView):
                 status=status.HTTP_500_INTERNAL_SERVER_ERROR
             )
 
-
 class TMDBMovieDetailView(APIView):
-    """
-    Proxy endpoint for TMDB movie details.
-    GET /api/tmdb/movies/<tmdb_id>/
-    """
+    """Proxy endpoint for TMDB movie details."""
     permission_classes = [AllowAny]
 
     def get(self, request, tmdb_id):
@@ -292,9 +445,8 @@ class TMDBMovieDetailView(APIView):
                 status=status.HTTP_500_INTERNAL_SERVER_ERROR
             )
 
-
 class TMDBTVDetailView(APIView):
-    """Proxy endpoint for TMDB TV show details (with seasons list)."""
+    """Proxy endpoint for TMDB TV show details."""
     permission_classes = [AllowAny]
 
     def get(self, request, tmdb_id):
@@ -306,9 +458,8 @@ class TMDBTVDetailView(APIView):
         except Exception as e:
             return Response({"error": str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
-
 class TMDBTVSeasonDetailView(APIView):
-    """Proxy endpoint for TMDB TV season (episodes list)."""
+    """Proxy endpoint for TMDB TV season."""
     permission_classes = [AllowAny]
 
     def get(self, request, tmdb_id, season_number):
@@ -319,7 +470,6 @@ class TMDBTVSeasonDetailView(APIView):
             return Response({"error": str(e)}, status=status.HTTP_404_NOT_FOUND)
         except Exception as e:
             return Response({"error": str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
-
 
 class TMDBPopularView(APIView):
     """Proxy endpoint for TMDB popular movies/TV shows."""
@@ -343,7 +493,6 @@ class TMDBPopularView(APIView):
                 status=status.HTTP_500_INTERNAL_SERVER_ERROR
             )
 
-
 class TMDBTopRatedView(APIView):
     """Proxy endpoint for TMDB top-rated movies/TV shows."""
     permission_classes = [AllowAny]
@@ -366,29 +515,17 @@ class TMDBTopRatedView(APIView):
                 status=status.HTTP_500_INTERNAL_SERVER_ERROR
             )
 
+# ============ MODEL VIEWSETS ============
 
 class MovieViewSet(viewsets.ModelViewSet):
-    """
-    API endpoint for Movie CRUD operations.
-    
-    GET /api/movies/ - List all movies
-    POST /api/movies/ - Create a movie
-    GET /api/movies/{id}/ - Get movie detail
-    PUT /api/movies/{id}/ - Update movie
-    DELETE /api/movies/{id}/ - Delete movie
-    POST /api/movies/get_or_create/ - Get or create movie from TMDB
-    """
+    """API endpoint for Movie CRUD operations."""
     queryset = Movie.objects.all()
     serializer_class = MovieSerializer
     permission_classes = [AllowAny]
 
     @action(detail=False, methods=["post"])
     def get_or_create(self, request):
-        """
-        Get or create a movie from TMDB ID.
-        If movie exists locally, return it.
-        If not, fetch from TMDB, create locally, and return.
-        """
+        """Get or create a movie from TMDB ID."""
         tmdb_id = request.data.get('tmdb_id')
         media_type = request.data.get('media_type', Movie.MediaType.MOVIE)
         
@@ -428,17 +565,6 @@ class MovieViewSet(viewsets.ModelViewSet):
 class PlaylistViewSet(viewsets.ModelViewSet):
     """
     API endpoint for Playlist CRUD operations.
-    
-    GET /api/playlists/ - List all user playlists (requires auth)
-    POST /api/playlists/ - Create a playlist (requires auth)
-    GET /api/playlists/{id}/ - Get playlist detail with movies (requires auth)
-    PUT /api/playlists/{id}/ - Update playlist (requires auth)
-    DELETE /api/playlists/{id}/ - Delete playlist (requires auth)
-    
-    Custom Actions:
-    POST /api/playlists/{id}/add_movie/ - Add a movie to playlist
-    DELETE /api/playlists/{id}/remove_movie/ - Remove a movie from playlist
-    PATCH /api/playlists/{id}/update_item_status/ - Update movie status in playlist
     """
     serializer_class = PlaylistSerializer
     permission_classes = [IsAuthenticated]
@@ -754,335 +880,6 @@ def generate_verification_code():
     return ''.join(random.choices(string.digits, k=6))
 
 
-class RequestPasswordResetView(APIView):
-    """
-    Request password reset code.
-    Accepts email or username and sends the code to the user's email.
-    POST /api/auth/password-reset/request/ - Send verification code to email
-    """
-    permission_classes = [AllowAny]
-
-    def post(self, request):
-        # Accept either email or username as the identifier
-        identifier = (
-            request.data.get('email', '')
-            or request.data.get('username', '')
-            or request.data.get('login', '')
-        ).strip()
-
-        if not identifier:
-            return Response(
-                {'error': 'Email or username is required'},
-                status=status.HTTP_400_BAD_REQUEST
-            )
-
-        user = User.objects.filter(
-            Q(email__iexact=identifier) | Q(username__iexact=identifier)
-        ).first()
-
-        if not user:
-            return Response(
-                {'error': 'No account found with this email or username'},
-                status=status.HTTP_404_NOT_FOUND
-            )
-
-        if not user.email:
-            return Response(
-                {'error': 'No email address is associated with this account'},
-                status=status.HTTP_400_BAD_REQUEST
-            )
-        
-        # Generate verification code
-        code = generate_verification_code()
-        
-        # Store code in cache with 10-minute expiration
-        cache_key = f'password_reset_{user.id}'
-        cache.set(cache_key, code, settings.PASSWORD_RESET_TIMEOUT)
-        
-        # Check if email is configured
-        if not settings.EMAIL_HOST_USER or not settings.EMAIL_HOST_PASSWORD:
-            # For development: return code in response (REMOVE IN PRODUCTION!)
-            return Response({
-                'message': 'Email not configured. Development mode: code shown in response',
-                'user_id': user.id,
-                'dev_code': code,  # Only for development!
-                'warning': 'Configure EMAIL_HOST_USER and EMAIL_HOST_PASSWORD environment variables'
-            }, status=status.HTTP_200_OK)
-        
-        # Send email
-        try:
-            subject = 'TrackR - Password Reset Code'
-            message = f"""
-Hello {user.username},
-
-You requested to reset your password for your TrackR account.
-
-Your verification code is: {code}
-
-This code will expire in 10 minutes.
-
-If you didn't request this, please ignore this email.
-
-Best regards,
-TrackR Trio
-            """
-            send_mail(
-                subject,
-                message,
-                settings.DEFAULT_FROM_EMAIL,
-                [user.email],
-                fail_silently=False,
-            )
-            
-            return Response({
-                'message': 'Verification code sent to your email',
-                'user_id': user.id
-            }, status=status.HTTP_200_OK)
-            
-        except Exception as e:
-            # Log the error for debugging
-            import traceback
-            print(f"Email sending error: {str(e)}")
-            print(traceback.format_exc())
-            
-            return Response(
-                {'error': f'Failed to send email. Please check server email configuration. Error: {str(e)}'},
-                status=status.HTTP_500_INTERNAL_SERVER_ERROR
-            )
-
-
-class VerifyResetCodeView(APIView):
-    """
-    Verify password reset code.
-    POST /api/auth/password-reset/verify/ - Verify the code
-    """
-    permission_classes = [AllowAny]
-
-    def post(self, request):
-        user_id = request.data.get('user_id')
-        code = request.data.get('code', '').strip()
-        
-        if not user_id or not code:
-            return Response(
-                {'error': 'User ID and code are required'},
-                status=status.HTTP_400_BAD_REQUEST
-            )
-        
-        cache_key = f'password_reset_{user_id}'
-        stored_code = cache.get(cache_key)
-        
-        if not stored_code:
-            return Response(
-                {'error': 'Code expired or invalid. Please request a new one'},
-                status=status.HTTP_400_BAD_REQUEST
-            )
-        
-        if stored_code != code:
-            return Response(
-                {'error': 'Invalid verification code'},
-                status=status.HTTP_400_BAD_REQUEST
-            )
-        
-        # Mark code as verified (store with different key)
-        verified_key = f'password_reset_verified_{user_id}'
-        cache.set(verified_key, True, 600)  # 10 minutes to complete reset
-        
-        return Response({
-            'message': 'Code verified successfully'
-        }, status=status.HTTP_200_OK)
-
-
-class ResetPasswordView(APIView):
-    """
-    Reset password after verification.
-    POST /api/auth/password-reset/confirm/ - Set new password
-    """
-    permission_classes = [AllowAny]
-
-    def post(self, request):
-        user_id = request.data.get('user_id')
-        new_password = request.data.get('new_password')
-        
-        if not user_id or not new_password:
-            return Response(
-                {'error': 'User ID and new password are required'},
-                status=status.HTTP_400_BAD_REQUEST
-            )
-        
-        if len(new_password) < 8:
-            return Response(
-                {'error': 'Password must be at least 8 characters long'},
-                status=status.HTTP_400_BAD_REQUEST
-            )
-        
-        # Check if code was verified
-        verified_key = f'password_reset_verified_{user_id}'
-        if not cache.get(verified_key):
-            return Response(
-                {'error': 'Please verify your code first'},
-                status=status.HTTP_400_BAD_REQUEST
-            )
-        
-        try:
-            user = User.objects.get(id=user_id)
-            user.set_password(new_password)
-            user.save()
-            
-            # Clear cache keys
-            cache.delete(f'password_reset_{user_id}')
-            cache.delete(verified_key)
-            
-            return Response({
-                'message': 'Password reset successfully'
-            }, status=status.HTTP_200_OK)
-            
-        except User.DoesNotExist:
-            return Response(
-                {'error': 'User not found'},
-                status=status.HTTP_404_NOT_FOUND
-            )
-
-
-class RequestChangePasswordCodeView(APIView):
-    """
-    Request verification code for changing password (authenticated users).
-    POST /api/auth/change-password/request/ - Send code to user's email
-    """
-    permission_classes = [IsAuthenticated]
-
-    def post(self, request):
-        user = request.user
-        
-        if not user.email:
-            return Response(
-                {'error': 'No email address associated with your account'},
-                status=status.HTTP_400_BAD_REQUEST
-            )
-        
-        # Generate verification code
-        code = generate_verification_code()
-        
-        # Store code in cache
-        cache_key = f'change_password_{user.id}'
-        cache.set(cache_key, code, settings.PASSWORD_RESET_TIMEOUT)
-        
-        # Check if email is configured
-        if not settings.EMAIL_HOST_USER or not settings.EMAIL_HOST_PASSWORD:
-            # For development: return code in response (REMOVE IN PRODUCTION!)
-            return Response({
-                'message': 'Email not configured. Development mode: code shown in response',
-                'email': user.email,
-                'dev_code': code,  # Only for development!
-                'warning': 'Configure EMAIL_HOST_USER and EMAIL_HOST_PASSWORD environment variables'
-            }, status=status.HTTP_200_OK)
-        
-        # Send email
-        try:
-            subject = 'TrackR - Change Password Verification Code'
-            message = f"""
-Hello {user.username},
-
-You requested to change your password for your TrackR account.
-
-Your verification code is: {code}
-
-This code will expire in 10 minutes.
-
-If you didn't request this, please secure your account immediately.
-
-Best regards,
-TrackR Team
-            """
-            send_mail(
-                subject,
-                message,
-                settings.DEFAULT_FROM_EMAIL,
-                [user.email],
-                fail_silently=False,
-            )
-            
-            return Response({
-                'message': 'Verification code sent to your email',
-                'email': user.email
-            }, status=status.HTTP_200_OK)
-            
-        except Exception as e:
-            # Log the error for debugging
-            import traceback
-            print(f"Email sending error: {str(e)}")
-            print(traceback.format_exc())
-            
-            return Response(
-                {'error': f'Failed to send email. Please check server email configuration. Error: {str(e)}'},
-                status=status.HTTP_500_INTERNAL_SERVER_ERROR
-            )
-
-
-class ChangePasswordView(APIView):
-    """
-    Change password with verification code (authenticated users).
-    POST /api/auth/change-password/ - Change password
-    """
-    permission_classes = [IsAuthenticated]
-
-    def post(self, request):
-        user = request.user
-        code = request.data.get('code', '').strip()
-        current_password = request.data.get('current_password')
-        new_password = request.data.get('new_password')
-        
-        if not code or not current_password or not new_password:
-            return Response(
-                {'error': 'Code, current password, and new password are required'},
-                status=status.HTTP_400_BAD_REQUEST
-            )
-        
-        # Verify current password
-        if not user.check_password(current_password):
-            return Response(
-                {'error': 'Current password is incorrect'},
-                status=status.HTTP_400_BAD_REQUEST
-            )
-        
-        # Verify code
-        cache_key = f'change_password_{user.id}'
-        stored_code = cache.get(cache_key)
-        
-        if not stored_code:
-            return Response(
-                {'error': 'Code expired or invalid. Please request a new one'},
-                status=status.HTTP_400_BAD_REQUEST
-            )
-        
-        if stored_code != code:
-            return Response(
-                {'error': 'Invalid verification code'},
-                status=status.HTTP_400_BAD_REQUEST
-            )
-        
-        if len(new_password) < 8:
-            return Response(
-                {'error': 'New password must be at least 8 characters long'},
-                status=status.HTTP_400_BAD_REQUEST
-            )
-        
-        # Change password
-        user.set_password(new_password)
-        user.save()
-        
-        # Clear cache
-        cache.delete(cache_key)
-        
-        # Regenerate token for security
-        Token.objects.filter(user=user).delete()
-        new_token = Token.objects.create(user=user)
-        
-        return Response({
-            'message': 'Password changed successfully',
-            'access': new_token.key
-        }, status=status.HTTP_200_OK)
-
-
 class FavoriteViewSet(viewsets.ModelViewSet):
     """
     ViewSet for managing user favorites.
@@ -1100,23 +897,17 @@ class FavoriteViewSet(viewsets.ModelViewSet):
         """Add a movie/series to favorites."""
         tmdb_id = request.data.get('tmdb_id')
         media_type = request.data.get('media_type', 'movie')
-
         if not tmdb_id:
             return Response(
                 {'error': 'tmdb_id is required'},
                 status=status.HTTP_400_BAD_REQUEST
             )
-
         try:
-            # Get or create the movie from TMDB
             movie, created = get_or_create_movie_from_tmdb(tmdb_id, media_type)
-            
-            # Check if already favorited
             existing_favorite = Favorite.objects.filter(
                 user=request.user,
                 movie=movie
             ).first()
-
             if existing_favorite:
                 serializer = self.get_serializer(existing_favorite)
                 return Response(
@@ -1126,16 +917,12 @@ class FavoriteViewSet(viewsets.ModelViewSet):
                     },
                     status=status.HTTP_200_OK
                 )
-
-            # Create favorite
             favorite = Favorite.objects.create(
                 user=request.user,
                 movie=movie
             )
-
             serializer = self.get_serializer(favorite)
             return Response(serializer.data, status=status.HTTP_201_CREATED)
-
         except TMDBError as e:
             return Response(
                 {'error': f'TMDB Error: {str(e)}'},
