@@ -1,4 +1,3 @@
-from .views import simple_change_password_request, simple_change_password
 from django.urls import path, include
 from rest_framework.routers import DefaultRouter
 from .views import (
@@ -20,6 +19,9 @@ from .views import (
     ResetPasswordView,
     LoginView,
     RegisterView
+    ,
+    simple_change_password_request,
+    simple_change_password
 )
 
 
@@ -52,9 +54,10 @@ urlpatterns = [
     path("auth/password-reset/request/", RequestPasswordResetView.as_view(), name="password-reset-request"),
     path("auth/password-reset/verify/", VerifyResetCodeView.as_view(), name="password-reset-verify"),  # ADD THIS LINE!
     path("auth/password-reset/confirm/", ResetPasswordView.as_view(), name="password-reset-confirm"),
-    # USE SIMPLE CHANGE PASSWORD ENDPOINTS ONLY
+    # 2-STEP FLOW (Change Password)
     path("auth/change-password/request/", simple_change_password_request, name="change-password-request"),
     path("auth/change-password/", simple_change_password, name="change-password"),
+    # (Removed simple change-password endpoints; using 3-step password reset instead)
     # Auth endpoints
     path('auth/login/', LoginView.as_view(), name='login'),
     path('auth/register/', RegisterView.as_view(), name='register'),

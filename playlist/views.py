@@ -45,16 +45,32 @@ User = get_user_model()
 # ============ SIMPLE CHANGE PASSWORD ENDPOINTS ============
 
 @api_view(['POST'])
-@permission_classes([IsAuthenticated])
+@permission_classes([AllowAny])
 @csrf_exempt
 def simple_change_password_request(request):
-    """Simple change password request - returns code in response"""
-    user = request.user
-    if not user.email:
+    """Public password reset request - returns code in response"""
+    email = request.data.get('email')
+
+    if not email:
         return Response(
-            {'error': 'No email address associated with your account'},
+            {'error': 'Email is required'},
             status=status.HTTP_400_BAD_REQUEST
         )
+
+    try:
+        user = User.objects.get(email=email)
+    except User.DoesNotExist:
+        return Response(
+            {'error': 'No user found with this email'},
+            status=status.HTTP_404_NOT_FOUND
+        )
+
+    if not user.email:
+        return Response(
+            {'error': 'No email address associated with this account'},
+            status=status.HTTP_400_BAD_REQUEST
+        )
+
     code = ''.join(random.choices(string.digits, k=6))
     cache_key = f'change_password_{user.id}'
     cache.set(cache_key, code, 600)  # 10 minutes
@@ -96,61 +112,69 @@ def simple_change_password_request(request):
     })
 
 @api_view(['POST'])
-@permission_classes([IsAuthenticated])
+@permission_classes([AllowAny])
 @csrf_exempt
 def simple_change_password(request):
-    """Simple change password with code"""
-    user = request.user
+    """Public password reset with code"""
+    user_id = request.data.get('user_id')
     code = request.data.get('code', '').strip()
     current_password = request.data.get('current_password')
     new_password = request.data.get('new_password')
-    
-    if not code or not current_password or not new_password:
+
+    if not user_id or not code or not current_password or not new_password:
         return Response(
-            {'error': 'Code, current password, and new password are required'},
+            {'error': 'User ID, code, current password and new password are required'},
             status=status.HTTP_400_BAD_REQUEST
         )
-    
+
+    try:
+        user = User.objects.get(id=user_id)
+    except User.DoesNotExist:
+        return Response(
+            {'error': 'User not found'},
+            status=status.HTTP_404_NOT_FOUND
+        )
+
     # Verify current password
     if not user.check_password(current_password):
         return Response(
             {'error': 'Current password is incorrect'},
             status=status.HTTP_400_BAD_REQUEST
         )
-    
+
     # Verify code
-    cache_key = f'change_password_{user.id}'
+    cache_key = f'change_password_{user_id}'
     stored_code = cache.get(cache_key)
-    
+
     if not stored_code:
         return Response(
             {'error': 'Code expired or invalid. Please request a new one'},
             status=status.HTTP_400_BAD_REQUEST
         )
-    
+
     if stored_code != code:
         return Response(
             {'error': 'Invalid verification code'},
             status=status.HTTP_400_BAD_REQUEST
         )
-    
+
     if len(new_password) < 8:
         return Response(
             {'error': 'New password must be at least 8 characters long'},
             status=status.HTTP_400_BAD_REQUEST
         )
-    
+
     # Change password
     user.set_password(new_password)
     user.save()
-    
+
     # Clear cache
     cache.delete(cache_key)
-    
+
     # Regenerate token
     Token.objects.filter(user=user).delete()
     new_token = Token.objects.create(user=user)
-    
+
     return Response({
         'message': 'Password changed successfully',
         'access': new_token.key
