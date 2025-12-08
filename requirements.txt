@@ -19,3 +19,6 @@ requests>=2.31
 
 # Environment Variable Support
 python-decouple
+
+# Email Provider
+resend>=2.19.0
