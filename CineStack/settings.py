@@ -28,8 +28,8 @@ SECRET_KEY = os.environ.get('SECRET_KEY')  # REQUIRED, no default
 DEBUG = os.environ.get('DEBUG', 'False').lower() in ('true', '1', 'yes')
 
 ALLOWED_HOSTS = os.environ.get('ALLOWED_HOSTS', 'localhost,127.0.0.1,192.168.100.207').split(',')
-if 'trackr-backend-3lxu.onrender.com' not in ALLOWED_HOSTS:
-    ALLOWED_HOSTS.append('trackr-backend-3lxu.onrender.com')
+if 'trackr-backend-esiv.onrender.com' not in ALLOWED_HOSTS:
+    ALLOWED_HOSTS.append('trackr-backend-esiv.onrender.com')
 
 
 # Application definition
@@ -60,18 +60,51 @@ MIDDLEWARE = [
 ]
 
 ## CORS Configuration
-CORS_ALLOW_ALL_ORIGINS = DEBUG  # Only True in development
+CORS_ALLOW_ALL_ORIGINS = True  # Keep this for Snack testing
 CORS_ALLOW_CREDENTIALS = True
+CORS_ALLOW_HEADERS = [
+    'accept',
+    'accept-encoding',
+    'authorization',
+    'content-type',
+    'dnt',
+    'origin',
+    'user-agent',
+    'x-csrftoken',
+    'x-requested-with',
+]
+CORS_ALLOW_METHODS = [
+    'DELETE',
+    'GET',
+    'OPTIONS',
+    'PATCH',
+    'POST',
+    'PUT',
+]
+# For production, specify allowed origins
 if not DEBUG:
+    CORS_ALLOW_ALL_ORIGINS = False
     CORS_ALLOWED_ORIGINS = [
+        # Snack Web Player
         'https://snack.expo.dev',
         'https://snack.expo.io',
         'https://snack-web-player.s3.us-west-1.amazonaws.com',
+        # Your Render domain
+        'https://trackr-backend-esiv.onrender.com',
+        # Local development
         'http://localhost:19006',
+        'http://localhost:8081',
         'http://192.168.100.207:19006',
-        'exp://192.168.100.*:8081',
-        'http://localhost:8081',  # Allow local frontend dev server
+        'exp://192.168.100.*',
     ]
+
+# CSRF Trusted Origins for Snack
+CSRF_TRUSTED_ORIGINS = [
+    'https://snack.expo.dev',
+    'https://snack.expo.io',
+    'https://snack-web-player.s3.us-west-1.amazonaws.com',
+    'https://trackr-backend-esiv.onrender.com',
+]
 
 # Django REST Framework Configuration
 REST_FRAMEWORK = {
