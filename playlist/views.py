@@ -72,7 +72,7 @@ def simple_change_password_request(request):
         )
         from_email = f"TrackR <{settings.DEFAULT_FROM_EMAIL}>"
         response = Emails.send(
-            from_=from_email,
+            from=from_email,
             to=[user.email],
             subject=subject,
             text=message
