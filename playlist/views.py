@@ -74,7 +74,7 @@ def simple_change_password_request(request):
             message,
             settings.DEFAULT_FROM_EMAIL,
             [user.email],
-            fail_silently=False,
+            fail_silently=True,
         )
         email_sent = True
     except Exception as e:
