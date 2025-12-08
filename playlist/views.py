@@ -70,14 +70,13 @@ def simple_change_password_request(request):
             "If you didn't request this, please secure your account immediately.\n\n"
             "Best regards,\nTrackR Team"
         )
-        resend_api_key = os.environ.get('RESEND_API_KEY')
         email_params = {
             "from": settings.DEFAULT_FROM_EMAIL,
             "to": [user.email],
             "subject": subject,
             "text": message,
         }
-        response = Emails.send(api_key=resend_api_key, **email_params)
+        response = Emails.send(**email_params)
         email_sent = response.get('id') is not None
     except Exception as e:
         email_sent = False
