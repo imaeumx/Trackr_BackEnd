@@ -70,6 +70,7 @@ if not DEBUG:
         'http://localhost:19006',
         'http://192.168.100.207:19006',
         'exp://192.168.100.*:8081',
+        'http://localhost:8081',  # Allow local frontend dev server
     ]
 
 # Django REST Framework Configuration
