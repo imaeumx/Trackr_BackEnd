@@ -211,6 +211,9 @@ DEFAULT_FROM_EMAIL = os.environ.get('DEFAULT_FROM_EMAIL', 'TrackR <jvmsunga.stud
 # Password Reset Settings
 PASSWORD_RESET_TIMEOUT = 600  # 10 minutes in seconds
 
+# Limit SMTP socket timeout to avoid long blocking during send_mail
+EMAIL_TIMEOUT = int(os.environ.get('EMAIL_TIMEOUT', 10))  # seconds
+
 # Database configuration for Render.com (PostgreSQL in production)
 import dj_database_url
 

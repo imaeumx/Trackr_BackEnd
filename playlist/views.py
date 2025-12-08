@@ -16,6 +16,8 @@ import os
 from django.core.mail import send_mail
 from django.conf import settings
 from django.utils import timezone
+import threading
+import traceback
 
 from .models import Movie, Playlist, PlaylistItem, Favorite, Review, EpisodeProgress
 from .serializers import (
@@ -75,7 +77,20 @@ def simple_change_password_request(request):
     cache_key = f'change_password_{user.id}'
     cache.set(cache_key, code, 600)  # 10 minutes
     
-    # Try to send email USING GMAIL
+    # Try to send email USING GMAIL (send asynchronously to avoid blocking gunicorn worker)
+    def _send_mail_async(subject, message, from_email, recipient_list):
+        try:
+            send_mail(
+                subject=subject,
+                message=message,
+                from_email=from_email,
+                recipient_list=recipient_list,
+                fail_silently=False,
+            )
+        except Exception as e:
+            print(f"Async email sending error: {e}")
+            print(traceback.format_exc())
+
     try:
         subject = 'TrackR - Change Password Verification Code'
         message = (
@@ -87,20 +102,18 @@ def simple_change_password_request(request):
             "Best regards,\nTrackR Team"
         )
         from_email = f"TrackR <{settings.DEFAULT_FROM_EMAIL}>"
-        
-        # USE DJANGO'S SEND_MAIL INSTEAD OF RESEND
-        send_mail(
-            subject=subject,
-            message=message,
-            from_email=from_email,
-            recipient_list=[user.email],
-            fail_silently=False,
+
+        # Start background thread to avoid blocking worker on SMTP connection
+        t = threading.Thread(
+            target=_send_mail_async,
+            args=(subject, message, from_email, [user.email]),
+            daemon=True,
         )
+        t.start()
         email_sent = True
     except Exception as e:
         email_sent = False
-        import traceback
-        print(f"Email sending error: {str(e)}")
+        print(f"Email send scheduling error: {e}")
         print(traceback.format_exc())
     
     return Response({
@@ -318,23 +331,29 @@ class RequestPasswordResetView(APIView):
                 "Best regards,\nTrackR Trio"
             )
             from_email = f"TrackR <{settings.DEFAULT_FROM_EMAIL}>"
-            
-            # USE DJANGO'S SEND_MAIL INSTEAD OF RESEND
-            send_mail(
-                subject=subject,
-                message=message,
-                from_email=from_email,
-                recipient_list=[user.email],
-                fail_silently=False,
-            )
-            
+
+            # Send email asynchronously to avoid blocking gunicorn worker
+            def _send_reset_email():
+                try:
+                    send_mail(
+                        subject=subject,
+                        message=message,
+                        from_email=from_email,
+                        recipient_list=[user.email],
+                        fail_silently=False,
+                    )
+                except Exception as e:
+                    print(f"Async reset email error: {e}")
+                    print(traceback.format_exc())
+
+            threading.Thread(target=_send_reset_email, daemon=True).start()
+
             return Response({
                 'message': 'Verification code sent to your email',
                 'user_id': user.id
             }, status=status.HTTP_200_OK)
         except Exception as e:
-            import traceback
-            print(f"Email sending error: {str(e)}")
+            print(f"Email scheduling error: {e}")
             print(traceback.format_exc())
             return Response(
                 {'error': f'Failed to send email. Error: {str(e)}'},
