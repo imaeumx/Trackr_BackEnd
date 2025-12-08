@@ -25,9 +25,14 @@ BASE_DIR = Path(__file__).resolve().parent.parent
 SECRET_KEY = os.environ.get('SECRET_KEY', 'FoDuozbhwXFlf7x-t0_3FB8zeNnrJOUUQuKWkNyWqwg9bjZJzp7Ltz5r5abk1enTUdo')
 
 # SECURITY WARNING: don't run with debug turned on in production!
-DEBUG = os.environ.get('DEBUG', 'True').lower() in ('true', '1', 'yes')
+DEBUG = False  # Set to False for production
 
-ALLOWED_HOSTS = os.environ.get('ALLOWED_HOSTS', 'localhost,127.0.0.1,192.168.100.207').split(',')
+ALLOWED_HOSTS = [
+    'localhost',
+    '127.0.0.1',
+    '192.168.100.207',
+    'trackr-backend-3lxu.onrender.com',  # Render production domain
+]
 
 
 # Application definition
