@@ -16,3 +16,6 @@ whitenoise>=6.6
 
 # HTTP Client for TMDB
 requests>=2.31
+
+# Environment Variable Support
+python-decouple
